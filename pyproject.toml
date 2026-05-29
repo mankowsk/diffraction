@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diffraction"
+version = "0.1.0"
+description = "A Python library for X-ray diffraction calculations on crystals and phonon modes"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Hello", email = "hello@example.com" }
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.20.0",
+    "pandas>=1.3.0",
+    "diffcalc>=1.0",
+    "xrayutilities>=1.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov>=2.12",
+    "black>=21.0",
+    "flake8>=3.9",
+    "mypy>=0.900",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["diffraction*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
