@@ -1,0 +1,37 @@
+data_global
+_chemical_formula_sum 'Li Nb O3'
+_cell_length_a 5.49445
+_cell_length_b 5.49445
+_cell_length_c 5.49445
+_cell_angle_alpha 55.8739
+_cell_angle_beta 55.8739
+_cell_angle_gamma 55.8739
+_cell_volume 106.071
+_space_group_crystal_system triclinic
+_space_group_IT_number 1
+_space_group_name_H-M_alt 'P1'
+
+loop_
+_space_group_symop_operation_xyz
+'x, y, z'
+
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_symmetry_multiplicity
+_atom_site_Wyckoff_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+_atom_site_B_iso_or_equiv
+Li1 Li 1 a 0.28324 0.28324 0.28324 1.0000 1.0000
+Li2 Li 1 a 0.78324 0.78324 0.78324 1.0000 1.0000
+Nb1 Nb 1 a 0.99967 0.99967 0.99967 1.0000 1.0000
+Nb2 Nb 1 a 0.49967 0.49967 0.49967 1.0000 1.0000
+O1 O 1 a 0.11535 0.35764 0.72109 1.0000 1.0000
+O2 O 1 a 0.35764 0.72109 0.11535 1.0000 1.0000
+O3 O 1 a 0.61535 0.22109 0.85764 1.0000 1.0000
+O4 O 1 a 0.72109 0.11535 0.35764 1.0000 1.0000
+O5 O 1 a 0.22109 0.85764 0.61535 1.0000 1.0000
+O6 O 1 a 0.85764 0.61535 0.22109 1.0000 1.0000
