@@ -98,8 +98,6 @@ def _load_from_disk(path: str) -> Any:
     Returns:
         Crystal: New Crystal instance with all properties restored
     """
-    import xrayutilities as xu
-    from diffcalc.hkl.geometry import Position
 
     with open(path, "r") as f:
         data = json.load(f)
@@ -119,7 +117,7 @@ def _instantiate_crystal(data: dict[str, Any]) -> Any:
     Returns:
         Crystal: New Crystal instance
     """
-    from . import Crystal  # Avoid circular import
+    from diffraction.core.crystal import Crystal  # Avoid circular import
 
     crystal = Crystal(**data["unit_cell"])
     return crystal
@@ -132,6 +130,7 @@ def _restore_state(crystal: Any, data: dict[str, Any]) -> None:
         crystal: New Crystal instance
         data: Deserialized JSON data
     """
+    import xrayutilities as xu
     import numpy as np
     from diffcalc.hkl.geometry import Position
 
@@ -157,4 +156,6 @@ def _restore_state(crystal: Any, data: dict[str, Any]) -> None:
         crystal.xu_cif_path = data["xu_cif_path"]
 
     if "phonons" in data:
-        crystal.phonons = {k: np.array(v) for k, v in data["phonons"].items()}
+        for k, v in data["phonons"].items():
+            crystal.phonons.add_mode(k, np.array(v))
+    

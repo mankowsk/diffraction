@@ -6,6 +6,7 @@ from .phonon_mode import plot_phonon_mode
 from .ub_refinement import plot_ub_refinement
 from .structure_factor import plot_structure_factor_vs_energy
 from .angular_solutions import plot_angular_solutions
+from .crystal_visualization import CrystalVisualization, VisualizationError
 
 __all__ = [
     "plot_diffraction_pattern",
@@ -14,4 +15,7 @@ __all__ = [
     "plot_ub_refinement",
     "plot_structure_factor_vs_energy",
     "plot_angular_solutions",
+    "CrystalVisualization",
+    "VisualizationError",
 ]
+

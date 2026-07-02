@@ -1,0 +1,41 @@
+<?xml version="1.0" ?>
+<robot name="Sphere" xmlns:xacro="http://ros.org/wiki/xacro">
+  <link name="base">
+  </link>
+  <link name="x">
+  </link>
+  <link name="y">
+  </link>
+  <link name="z">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <sphere radius="0.2"/>
+      </geometry>
+      <material name="">
+        <color rgba="1.0 0.607843137255 0.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="x" type="prismatic">
+    <parent link="base"/>
+    <child link="x"/>
+    <origin rpy="0 0. 0" xyz="0 0 0."/>
+    <axis xyz="1 0 0"/>
+    <limit effort="692.0" lower="-inf" upper="inf" velocity="2."/>
+  </joint>
+  <joint name="y" type="prismatic">
+    <parent link="x"/>
+    <child link="y"/>
+    <origin rpy="0 0. 0" xyz="0 0 0."/>
+    <axis xyz="0 1 0"/>
+    <limit effort="692.0" lower="-inf" upper="inf" velocity="2."/>
+  </joint>
+  <joint name="z" type="prismatic">
+    <parent link="y"/>
+    <child link="z"/>
+    <origin rpy="0 0. 0" xyz="0 0 0."/>
+    <axis xyz="0 0 1"/>
+    <limit effort="692.0" lower="-inf" upper="inf" velocity="2."/>
+  </joint>
+</robot>

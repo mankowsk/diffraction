@@ -26,7 +26,7 @@ class Crystal:
         xucalc: xrayutilities Crystal object
         xu_lattice: xrayutilities SGLattice object
         xu_cif_path: Path to the source CIF file
-        phonons: Dictionary of phonon displacement modes
+        phonons: PhononsManager instance for managing phonon modes
         constraints: Diffractometer angle constraints
 
     Example:
@@ -61,7 +61,8 @@ class Crystal:
         self.xucalc: xu.materials.Crystal | None = None
         self.xu_lattice: xu.materials.SGLattice | None = None
         self.xu_cif_path: str | None = None
-        self.phonons: dict[str, np.ndarray] = {}
+        from diffraction.phonons import PhononsManager
+        self.phonons = PhononsManager(self)
         self.constraints: dict[str, float | None] = {
             "mu": None, "eta": None, "chi": None, "phi": None,
             "delta": None, "gamma": None, "a_eq_b": None,
@@ -163,13 +164,11 @@ class Crystal:
         self.ub_matrix = self.ubcalc.UB
         return ub, lat
 
-    def calc_angles(self, h: int, k: int, l: int, energy: float, pandas: bool = True) -> pd.DataFrame | list[dict]:
+    def calc_angles(self, hkl: tuple[int, int, int], energy: float, pandas: bool = True) -> pd.DataFrame | list[dict]:
         """Calculate diffractometer angles for a given reflection.
 
         Args:
-            h: Miller index h
-            k: Miller index k
-            l: Miller index l
+            hkl: Miller indices (h, k, l) of the reflection
             energy: X-ray energy in eV
             pandas: If True, return results as pandas DataFrame (default True)
 
@@ -179,7 +178,7 @@ class Crystal:
         constraints = Constraints({"nu" if k == "gamma" else k: v for k, v in self.constraints.items()})
         hklcalc = HklCalculation(self.ubcalc, constraints)
         lam = 12398.419843320025 / energy
-        result = hklcalc.get_position(h, k, l, lam)
+        result = hklcalc.get_position(*hkl, lam)
         if pandas:
             result = pd.concat(
                 [
@@ -227,14 +226,19 @@ class Crystal:
             return None
         return hkl
 
-    def add_phonon(self, name: str, vectors: np.ndarray | list[list[float]]) -> None:
+    def add_phonon(self, name: str, vectors: np.ndarray | list[list[float]], atom_names: list[str] | None = None, frequency: float | None = None) -> None:
         """Add a phonon displacement mode for structure factor calculations.
 
         Args:
             name: Identifier for the phonon mode
-            vectors: Array of displacement vectors for each atom (shape: n_atoms x 3)
+            vectors: Array of displacement vectors (shape: n_atoms x 3)
+            atom_names: Optional list of atom names for labeling
+            frequency: Mode frequency in THz or cm^-1
+
+        Raises:
+            ValueError: If vectors shape doesn't match number of atoms in crystal
         """
-        self.phonons[name] = np.array(vectors)
+        self.phonons.add_mode(name=name, vectors=vectors, atom_names=atom_names, frequency=frequency)
 
     def delete_phonon(self, name: str) -> None:
         """Remove a phonon mode from the crystal.
@@ -242,8 +246,7 @@ class Crystal:
         Args:
             name: Identifier of the phonon mode to remove
         """
-        if name in self.phonons:
-            del self.phonons[name]
+        self.phonons.delete_mode(name)
 
     def calc_structure_factor(self, hkl: tuple[int, int, int], energy: float) -> complex:
         """Calculate the static structure factor F(h,k,l) at a given energy.
@@ -283,7 +286,7 @@ class Crystal:
         Raises:
             ValueError: If phonon mode not found or xrayutilities objects not initialized
         """
-        if phonon_name not in self.phonons:
+        if phonon_name not in self.phonons._modes:
             raise ValueError(f"Phonon mode '{phonon_name}' not found.")
         if self.xucalc is None or self.xu_lattice is None:
             raise ValueError("xrayutilities Crystal and SGLattice must be set for structure factor calculation.")
@@ -294,7 +297,7 @@ class Crystal:
         F = []
         for i, atompos in enumerate(self.xucalc.lattice._wbase):
             u = atompos[1][1]
-            displaced_u = u + amplitude[:, np.newaxis] * self.phonons[phonon_name][i]
+            displaced_u = u + amplitude[:, np.newaxis] * self.phonons._modes[phonon_name].vectors[i]
             f = atompos[0].f(np.linalg.norm(q), energy)
             F.append(f * np.exp(-2 * np.pi * 1j * np.dot(hkl, displaced_u.T)).T)
 
@@ -322,13 +325,90 @@ class Crystal:
         """
         return 12398.419843320025 / lam
 
+    def show_unit_cell(self, distance: float = 0.0,  browser: str | None = None) -> object:
+        """Display the crystal unit cell with reference planes.
+
+        This method creates a visualization of the crystal structure without
+        any phonon displacements, showing only the equilibrium atomic positions.
+
+        Args:
+            browser: which browser to open. For jupyter notebook or jupyterlab, use browser="notebook"
+            distance: Distance for reference planes from origin (default 0.0)
+
+        Raises:
+            ValueError: If xucalc is not initialized (load from CIF first)
+            ImportError: If visualization dependencies are not installed
+
+        Returns:
+            CrystalVisualization instance
+
+        Example:
+            >>> crystal = Crystal.from_cif("SrTiO3", "data/SrTiO3.cif")
+            >>> vis = crystal.show_unit_cell()
+        """
+        if self.xucalc is None:
+            raise ValueError(
+                "Crystal must be loaded from CIF file to visualize. "
+                "Use Crystal.from_cif('name', 'path/to/file.cif')."
+            )
+
+        from diffraction.visualization import CrystalVisualization
+
+        vis = CrystalVisualization(self, scale=0.1)
+        vis.create_atoms()
+        vis.show(browser=browser)
+        return vis
+
+    def show_phonon(
+        self,
+        mode_name: str | None = None,
+        scale: float = 1.0,
+        dt: float = 0.05,
+        amplitudes: np.ndarray | None = None,
+    ) -> None:
+        """Display and optionally animate a phonon mode.
+
+        This method creates a visualization of the crystal with atomic
+        displacements from the specified phonon mode. If amplitudes are
+        provided, it will animate the mode over time.
+
+        Args:
+            mode_name: Name of the phonon mode to visualize (default None uses first mode)
+            scale: Global scaling factor for visualization and displacements
+            dt: Time step in seconds for animation (default 0.05)
+            amplitudes: Array of amplitude values over time (n_modes x n_timepoints).
+                       If None, only shows static view.
+
+        Raises:
+            ValueError: If xucalc is not initialized or no phonon modes registered
+            KeyError: If the specified mode doesn't exist
+            ImportError: If visualization dependencies are not installed
+
+        Example:
+            >>> # Show a single mode statically
+            >>> crystal.show_phonon("soft_mode")
+            >>>
+            >>> # Animate with sinusoidal amplitudes
+            >>> import numpy as np
+            >>> n = np.linspace(0, 20*np.pi, 500)
+            >>> amplitudes = 0.5 * np.array([np.sin(n), np.cos(n)])
+            >>> crystal.show_phonon("soft_mode", amplitudes=amplitudes)
+        """
+        if self.xucalc is None:
+            raise ValueError(
+                "Crystal must be loaded from CIF file to visualize phonons. "
+                "Use Crystal.from_cif('name', 'path/to/file.cif')."
+            )
+
+        self.phonons.show(mode_name=mode_name, scale=scale, dt=dt, amplitudes=amplitudes)
+
     def save(self, basepath: str = "diffraction/data/") -> None:
         """Save crystal configuration to the specified directory.
 
         Args:
             basepath: Base directory path for saving files (default "diffraction/data/")
         """
-        from .io.json_io import save_crystal
+        from diffraction.io.json_io import save_crystal
         save_crystal(self, basepath)
 
     @classmethod
@@ -345,20 +425,36 @@ class Crystal:
         Raises:
             FileNotFoundError: If no name provided and no JSON files found in basepath
         """
-        from .io.json_io import load_crystal
+        from diffraction.io.json_io import load_crystal
         return load_crystal(name, basepath)
 
     def __repr__(self) -> str:
         """Return a string representation of the crystal."""
-        s = f"### UNIT CELL ###\n"
+        s = f"### LATTICE ###\n"
         for k, v in self.unit_cell.items():
             s += f"{k:6}: {v}\n"
+
+        if self.xucalc is not None:
+            s += f"\n### UNIT CELL ###\n"
+            for i, atom in enumerate(self.xucalc.lattice._wbase):
+                s += f"{i} {atom}\n"
+
         s += f"\n### ORIENTATIONS ###\n"
         s += f"{'hkl':15}{'xyz':15}{'tag'}\n"
         for orientation in self.orientations:
             s += f"{str(orientation['hkl']):15}{str(orientation['xyz']):15}{orientation['tag']}\n"
+
         s += f"\n### CONSTRAINTS ###\n"
         for k, v in self.constraints.items():
             if not v is None:
                 s += f"{k:6}: {v}\n"
+
+        # Add phonon modes section
+        if self.phonons.list_modes():
+            s += f"\n### PHONONS ###\n"
+            for mode_name in self.phonons.list_modes():
+                mode = self.phonons.get_mode(mode_name)
+                freq_str = f", freq={mode.frequency}" if mode.frequency is not None else ""
+                s += f"{mode_name}{freq_str}\n"
+
         return s
