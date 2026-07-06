@@ -402,12 +402,14 @@ class CrystalVisualization:
             )
 
         try:
-            import swift
             import roboticstoolbox as rtb
         except ImportError as e:
             raise VisualizationError(
                 "Visualization dependencies not found."
             ) from e
+
+        # Import visual primitives for arrow creation
+        from diffraction.visualization.visual_primitives import arrow as create_arrow
 
         # Default colors: red for a1, green for a2, blue for a3
         if colors is None:
@@ -425,11 +427,36 @@ class CrystalVisualization:
         ]
 
         for vec_name, vec in lattice_vectors:
-            # Create arrow geometry using Swift primitives
-            arrow = swift.Arrow(
-                start=np.array([0.0, 0.0, 0.0]) * self.scale,
-                end=(vec) * self.scale,
-                radius=0.005,
+            # Scale the vector
+            vec_scaled = np.array(vec) * self.scale
+
+            # Calculate length and direction angles (spherical coordinates)
+            length = np.linalg.norm(vec_scaled)
+
+            if length < 1e-10:
+                continue  # Skip zero-length vectors
+
+            # phi = azimuth angle about z-axis (from x-axis in xy-plane)
+            phi = np.arctan2(vec_scaled[1], vec_scaled[0])
+
+            # theta = polar angle from +z axis
+            theta = np.arccos(np.clip(vec_scaled[2] / length, -1.0, 1.0))
+
+            # Create arrow with appropriate length and orientation
+            # Use scaled shaft_radius proportional to vector length for better visibility
+            shaft_radius = max(0.001, length * 0.01)
+            cone_scale = shaft_radius * 5.0  # Maintain ~5:1 ratio
+
+            vec_arrow = create_arrow(
+                name=f"lattice_{vec_name}",
+                length=length,
+                shaft_radius=shaft_radius,
+                cone_scale=cone_scale,
                 color=colors[vec_name],
             )
-            self.env.add(arrow)
+
+            # Set q to position arrow at origin with correct orientation:
+            # [x, y, z, phi, theta] = [0, 0, 0, azimuth, polar_angle]
+            vec_arrow.q = np.array([0.0, 0.0, 0.0, phi, theta])
+
+            self.env.add(vec_arrow)

@@ -7,6 +7,14 @@ from .ub_refinement import plot_ub_refinement
 from .structure_factor import plot_structure_factor_vs_energy
 from .angular_solutions import plot_angular_solutions
 from .crystal_visualization import CrystalVisualization, VisualizationError
+from .visual_primitives import (
+    sphere,
+    cylinder,
+    cuboid,
+    cone,
+    arrow,
+    VisualizationError,
+)
 
 __all__ = [
     "plot_diffraction_pattern",
@@ -16,6 +24,11 @@ __all__ = [
     "plot_structure_factor_vs_energy",
     "plot_angular_solutions",
     "CrystalVisualization",
+    "sphere",
+    "cylinder",
+    "cuboid",
+    "cone",
+    "arrow",
     "VisualizationError",
 ]
 
