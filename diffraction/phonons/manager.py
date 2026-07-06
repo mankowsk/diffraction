@@ -27,6 +27,36 @@ class PhononMode:
         n_atoms = self.vectors.shape[0] if self.vectors.ndim > 1 else len(self.vectors) // 3
         return f"PhononMode(name='{self.name}', atoms={n_atoms}, freq={self.frequency})"
 
+    def to_dict(self) -> dict[str, object]:
+        """Convert phonon mode to a JSON-serializable dictionary.
+
+        Returns:
+            dict: Dictionary containing all PhononMode attributes
+        """
+        return {
+            "name": self.name,
+            "vectors": self.vectors.tolist(),
+            "atom_names": self.atom_names,  # None is JSON-serializable
+            "frequency": self.frequency,     # None is JSON-serializable
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "PhononMode":
+        """Create a PhononMode instance from a dictionary.
+
+        Args:
+            data: Dictionary containing phonon mode attributes
+
+        Returns:
+            PhononMode: New instance with attributes restored
+        """
+        return cls(
+            name=data["name"],
+            vectors=np.array(data["vectors"]),
+            atom_names=data.get("atom_names"),  # Handle missing key gracefully
+            frequency=data.get("frequency"),     # Handle missing key gracefully
+        )
+
 
 class PhononsManager:
     """Manages phonon modes for a Crystal instance.
@@ -124,6 +154,14 @@ class PhononsManager:
             list: Names of all registered phonon modes
         """
         return list(self._modes.keys())
+
+    def get_modes_dict(self) -> dict[str, dict]:
+        """Get all phonon modes as JSON-serializable dictionaries.
+
+        Returns:
+            dict: Mapping of mode names to their dictionary representation
+        """
+        return {name: mode.to_dict() for name, mode in self._modes.items()}
 
     def get_atom_names(self) -> list[str] | None:
         """Get atom names from the crystal structure.

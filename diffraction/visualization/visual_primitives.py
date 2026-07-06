@@ -92,7 +92,7 @@ def sphere(
     y = rtb.Link(rtb.ET.ty(), name="y", parent=x, qlim=(-1000, 1000))
     z = rtb.Link(rtb.ET.tz(), name="z", parent=y, qlim=(-1000, 1000))
 
-    geom = sg.Sphere(radius=radius, base=sm.SE3().A, color=color)
+    geom = sg.Sphere(radius=radius, pose=sm.SE3().A, color=color)
     sphere_link = rtb.Link(name="sphere", parent=z, geometry=[geom])
 
     robot = rtb.Robot([base, x, y, z, sphere_link], name=name)
@@ -132,7 +132,7 @@ def cylinder(
     theta = rtb.Link(rtb.ET.Ry(), name="theta", parent=phi)
 
     geom = sg.Cylinder(
-        radius=radius, length=length, base=sm.SE3.Tz(length / 2.0).A, color=color
+        radius=radius, length=length, pose=sm.SE3.Tz(length / 2.0).A, color=color
     )
     cylinder_link = rtb.Link(name="cylinder", parent=theta, geometry=[geom])
 
@@ -174,7 +174,7 @@ def cuboid(
     pitch = rtb.Link(rtb.ET.Ry(), name="pitch", parent=roll)
     yaw = rtb.Link(rtb.ET.Rz(), name="yaw", parent=pitch)
 
-    geom = sg.Cuboid(scale=[a, b, c], base=sm.SE3().A, color=color)
+    geom = sg.Cuboid(scale=[a, b, c], pose=sm.SE3().A, color=color)
     cuboid_link = rtb.Link(name="cuboid", parent=yaw, geometry=[geom])
 
     robot = rtb.Robot([base, x, y, z, roll, pitch, yaw, cuboid_link], name=name)
@@ -226,7 +226,7 @@ def cone(
     # Use identity transform - assume mesh has its base at (0,0,0) and extends along +z
     cone_local_pose = sm.SE3().A
 
-    geom = sg.Mesh(filename=mesh_file, scale=scale_vec, base=cone_local_pose, color=color)
+    geom = sg.Mesh(filename=mesh_file, scale=scale_vec, pose=cone_local_pose, color=color)
     cone_link = rtb.Link(name="cone", parent=theta, geometry=[geom])
 
     robot = rtb.Robot([base, x, y, z, phi, theta, cone_link], name=name)
@@ -295,14 +295,14 @@ def arrow(
 
     # Cylinder shaft from z=0 to z=shaft_length (centered at shaft_length/2)
     shaft_geom = sg.Cylinder(
-        radius=shaft_radius, length=shaft_length, base=sm.SE3.Tz(shaft_length / 2.0).A, color=color
+        radius=shaft_radius, length=shaft_length, pose=sm.SE3.Tz(shaft_length / 2.0).A, color=color
     )
 
     mesh_file = _mesh_path(mesh)
     # Cone head starts at z=shaft_length (base of cone is at shaft_length)
     # Use identity transform - assume mesh has its base at (0,0,0) and extends along +z
     cone_geom = sg.Mesh(
-        filename=mesh_file, scale=cone_vec, base=sm.SE3.Tz(shaft_length).A, color=color
+        filename=mesh_file, scale=cone_vec, pose=sm.SE3.Tz(shaft_length).A, color=color
     )
 
     arrow_link = rtb.Link(name="arrow", parent=theta, geometry=[shaft_geom, cone_geom])

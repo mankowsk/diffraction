@@ -357,6 +357,7 @@ class Crystal:
         vis = CrystalVisualization(self, scale=0.1)
         vis.create_atoms()
         vis.show(browser=browser)
+        vis.add_lattice_vectors()
         return vis
 
     def show_phonon(

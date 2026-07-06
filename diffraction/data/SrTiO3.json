@@ -1,1 +1,37 @@
-{"name": "SrTiO3", "unit_cell": {"name": "SrTiO3", "a": 3.94513, "b": 3.94513, "c": 3.94513, "alpha": 90.0, "beta": 90.0, "gamma": 90.0}, "constraints": {"mu": null, "eta": 0, "chi": 0, "phi": null, "delta": null, "gamma": null, "a_eq_b": null, "bin_eq_bout": null, "betain": null, "betaout": null, "qaz": null, "naz": null, "alpha": null, "beta": null, "bisect": null, "psi": null, "omega": null}, "orientations": [{"hkl": [0, 0, 1], "xyz": [0, 0, 1], "tag": "normal"}, {"hkl": [1, 0, 0], "xyz": [0, 1, 0], "tag": "inplane along beam"}], "reflections": [], "u_matrix": null, "ub_matrix": null, "xu_cif_path": "diffraction/data/SrTiO3.cif", "phonons": {}}
+{
+  "constraints": {
+    "a_eq_b": null,
+    "alpha": null,
+    "beta": null,
+    "betain": null,
+    "betaout": null,
+    "bin_eq_bout": null,
+    "bisect": null,
+    "chi": null,
+    "delta": null,
+    "eta": null,
+    "gamma": null,
+    "mu": null,
+    "naz": null,
+    "omega": null,
+    "phi": null,
+    "psi": null,
+    "qaz": null
+  },
+  "name": "SrTiO3",
+  "orientations": [],
+  "phonons": {},
+  "reflections": [],
+  "u_matrix": null,
+  "ub_matrix": null,
+  "unit_cell": {
+    "a": 3.94513,
+    "alpha": 90.0,
+    "b": 3.94513,
+    "beta": 90.0,
+    "c": 3.94513,
+    "gamma": 90.0,
+    "name": "SrTiO3"
+  },
+  "xu_cif_path": "diffraction/data/SrTiO3.cif"
+}

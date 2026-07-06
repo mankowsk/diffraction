@@ -31,7 +31,9 @@ def load_crystal(name: str | None = None, basepath: str = "diffraction/data/") -
         FileNotFoundError: If no name provided and no JSON files found in basepath
     """
     if name is not None:
-        path = basepath + name + ".json"
+        # Add .json extension only if not already present
+        json_name = name if name.endswith(".json") else name + ".json"
+        path = basepath + json_name
     else:
         names = [n.split(".json")[0] for n in os.listdir(basepath) if ".json" in n and not n == ".json"]
         names.sort()
@@ -53,7 +55,8 @@ def _save_to_disk(crystal: Any, path: str) -> None:
     data = _serialize_crystal(crystal)
 
     with open(json_path, "w") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, sort_keys=True)
+        f.write("\n")  # Trailing newline for POSIX compliance and readability
 
     if crystal.xucalc is not None and crystal.xu_cif_path is not None:
         if not xu_cif_path == crystal.xu_cif_path:
@@ -85,7 +88,7 @@ def _serialize_crystal(crystal: Any) -> dict[str, Any]:
         "u_matrix": crystal.u_matrix.tolist() if crystal.u_matrix is not None else None,
         "ub_matrix": crystal.ub_matrix.tolist() if crystal.ub_matrix is not None else None,
         "xu_cif_path": crystal.xu_cif_path,
-        "phonons": {k: v.tolist() for k, v in crystal.phonons.items()},
+        "phonons": crystal.phonons.get_modes_dict(),
     }
 
 
@@ -156,6 +159,14 @@ def _restore_state(crystal: Any, data: dict[str, Any]) -> None:
         crystal.xu_cif_path = data["xu_cif_path"]
 
     if "phonons" in data:
-        for k, v in data["phonons"].items():
-            crystal.phonons.add_mode(k, np.array(v))
-    
+        from diffraction.phonons.manager import PhononMode
+
+        for name, mode_data in data["phonons"].items():
+            phonon_mode = PhononMode.from_dict(mode_data)
+            crystal.phonons.add_mode(
+                name=name,
+                vectors=phonon_mode.vectors,
+                atom_names=phonon_mode.atom_names,
+                frequency=phonon_mode.frequency,
+            )
+

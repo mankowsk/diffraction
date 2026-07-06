@@ -1,1 +1,96 @@
-{"name": "Ba\u2083CeIr\u2082O", "unit_cell": {"name": "Ba\u2083CeIr\u2082O", "a": 5.903, "b": 5.903, "c": 14.71, "alpha": 90, "beta": 90, "gamma": 120}, "constraints": {"mu": null, "eta": 0, "chi": 0, "phi": null, "delta": null, "gamma": null, "a_eq_b": null, "bin_eq_bout": null, "betain": 0.5, "betaout": null, "qaz": null, "naz": null, "alpha": null, "beta": null, "bisect": null, "psi": null, "omega": null}, "orientations": [{"hkl": [0, 0, 1], "xyz": [0, 0, 1], "tag": "surface normal"}, {"hkl": [1, 0, 0], "xyz": [0, 1, 0], "tag": "inplane along beam"}], "reflections": [], "u_matrix": [[-6.842277657836021e-49, -1.0, -6.123233995736766e-17], [1.0, 3.749399456654643e-33, -6.123233995736766e-17], [6.123233995736766e-17, -6.123233995736765e-17, 1.0]], "ub_matrix": [[-8.409635009789576e-49, -1.0644054391291864, 0.0], [1.229069533616275, 0.6145347668081372, 0.0], [7.525880351363507e-17, -2.7546633944412016e-17, 0.42713700252750414]], "xu_cif_path": null, "phonons": {}}
+{
+  "constraints": {
+    "a_eq_b": null,
+    "alpha": null,
+    "beta": null,
+    "betain": 0.5,
+    "betaout": null,
+    "bin_eq_bout": null,
+    "bisect": null,
+    "chi": 0,
+    "delta": null,
+    "eta": 0,
+    "gamma": null,
+    "mu": null,
+    "naz": null,
+    "omega": null,
+    "phi": null,
+    "psi": null,
+    "qaz": null
+  },
+  "name": "Ba3CeIr2O9",
+  "orientations": [
+    {
+      "hkl": [
+        0,
+        0,
+        1
+      ],
+      "tag": "surface normal",
+      "xyz": [
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "hkl": [
+        1,
+        0,
+        0
+      ],
+      "tag": "inplane along beam",
+      "xyz": [
+        0,
+        1,
+        0
+      ]
+    }
+  ],
+  "phonons": {},
+  "reflections": [],
+  "u_matrix": [
+    [
+      -6.842277657836021e-49,
+      -1.0,
+      -6.123233995736766e-17
+    ],
+    [
+      1.0,
+      3.749399456654643e-33,
+      -6.123233995736766e-17
+    ],
+    [
+      6.123233995736766e-17,
+      -6.123233995736765e-17,
+      1.0
+    ]
+  ],
+  "ub_matrix": [
+    [
+      -8.409635009789576e-49,
+      -1.0644054391291864,
+      0.0
+    ],
+    [
+      1.229069533616275,
+      0.6145347668081372,
+      0.0
+    ],
+    [
+      7.525880351363507e-17,
+      -2.7546633944412016e-17,
+      0.42713700252750414
+    ]
+  ],
+  "unit_cell": {
+    "a": 5.903,
+    "alpha": 90,
+    "b": 5.903,
+    "beta": 90,
+    "c": 14.71,
+    "gamma": 120,
+    "name": "Ba\u2083CeIr\u2082O"
+  },
+  "xu_cif_path": null
+}

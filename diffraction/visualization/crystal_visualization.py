@@ -47,12 +47,13 @@ class CrystalVisualization:
         "Ti": (0.2, 0.2, 1.0, 1.0),
     }
 
-    def __init__(self, crystal: "Crystal", scale: float = 0.1) -> None:
+    def __init__(self, crystal: "Crystal", scale: float = 0.1, offset: np.ndarray | None = None) -> None:
         """Initialize the CrystalVisualization with a Crystal object.
 
         Args:
             crystal: The Crystal instance to visualize. Must have xucalc set.
             scale: Scaling factor for atomic radii and positions (default 0.1).
+            offset: Offset vector [x, y, z] applied to all atom positions (default [0, 0, 0.1]).
 
         Raises:
             VisualizationError: If the crystal's xucalc attribute is None.
@@ -62,6 +63,7 @@ class CrystalVisualization:
         self.atoms: dict[str, object] = {}
         self.planes: dict[int, object] = {}
         self.scale = scale
+        self.offset = offset if offset is not None else np.array([0.0, 0.0, 0.1])
         self.env = None
 
         if self.crystal.xucalc is None:
@@ -129,7 +131,7 @@ class CrystalVisualization:
                             )
 
                             atom_id = f"{a.name}{num}_{mult}"
-                            print(f"{atom_id} {np.round(np.array(vecpos), 2)}")
+                            #print(f"{atom_id} {np.round(np.array(vecpos), 2)}")
                             mult +=1
                             # Determine color for the atom
                             if a.name in self.COLORS:
@@ -139,16 +141,18 @@ class CrystalVisualization:
                             else:
                                 atom_color = (1.0, 1.0, 1.0, 1.0)
 
+                            # Apply scaling and offset to position
+                            pos_scaled = np.array(vecpos) * self.scale + self.offset
+
                             sphere = self._create_atom(
                                 name=atom_id,
-                                position=(np.array(vecpos) + np.array([0, 0, 1])) * self.scale,
+                                position=pos_scaled,
                                 color=atom_color,
-                                radius=a.radius / 3 if hasattr(a, "radius") else None,
-                                scale=self.scale,
+                                radius=a.radius * self.scale / 3 if hasattr(a, "radius") else None,
                             )
                             self.atoms[atom_id] = sphere
 
-            multiplicity.append(mult)
+                            multiplicity.append(mult)
 
         self.multiplicity = multiplicity
 
@@ -158,54 +162,32 @@ class CrystalVisualization:
         position: np.ndarray | list[float] = [0.0, 0.0, 0.0],
         color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 1.0),
         radius: float | None = None,
-        scale: float | None = None,
     ) -> object:
-        """Create a Robot object representing an atom.
+        """Create a Robot object representing an atom using visual_primitives.sphere().
 
         Args:
             name: Identifier for the atom
-            position: Initial position as [x, y, z] coordinates
+            position: Initial (equilibrium) position as [x, y, z] coordinates
             color: RGBA color tuple (values 0-1)
             radius: Radius of the atomic sphere
-            scale: Scale factor applied to geometry
 
         Returns:
-            Robot object configured with the specified properties
-
-        Raises:
-            VisualizationError: If URDF file cannot be loaded.
+            Robot object configured with the specified properties.
+            The equilibrium position is stored in atom.q0 for animation purposes.
         """
-        try:
-            import roboticstoolbox as rtb
-        except ImportError:
-            raise VisualizationError(
-                "Robotics Toolbox not installed. Install with:\n"
-                "  pip install git+https://github.com/PhilFreeman/robotics-toolbox-python.git"
-            )
+        # Import visual primitives for sphere creation
+        from diffraction.visualization.visual_primitives import sphere as create_sphere
 
-        try:
-            links, name, urdf_string, urdf_filepath = rtb.Robot.URDF_read(
-                "./atom.urdf", tld="/Users/hello/switchdrive/python/tools/atomic_motions"
-            )
-        except Exception as e:
-            raise VisualizationError(f"Failed to load atom URDF file: {e}") from e
+        # Determine atom radius - use default if not provided
+        atom_radius = 0.15 if radius is None else radius
 
-        atom = rtb.Robot(
-            links,
-            name=name,
-            urdf_string=urdf_string,
-            urdf_filepath=urdf_filepath,
-        )
+        # Create sphere using visual_primitives.sphere()
+        atom = create_sphere(name=name, radius=atom_radius, color=color)
 
-        # Configure the link geometry
-        atom.links[-1].geometry[0].color = tuple(color)
-        atom.q = position
-        atom.q0 = position
-
-        if radius is not None:
-            atom.links[-1].geometry[0].radius = radius
-        if scale is not None:
-            atom.links[-1].geometry[0].radius *= scale
+        # Set position (q for Sphere is [x, y, z])
+        pos_array = np.array(position)
+        atom.q = pos_array.copy()
+        atom.q0 = pos_array.copy()  # Store equilibrium position for animation
 
         return atom
 
@@ -427,8 +409,10 @@ class CrystalVisualization:
         ]
 
         for vec_name, vec in lattice_vectors:
-            # Scale the vector
+            # Scale the vector and apply offset to start position
             vec_scaled = np.array(vec) * self.scale
+            start_pos = self.offset.copy()
+            end_pos = self.offset + vec_scaled
 
             # Calculate length and direction angles (spherical coordinates)
             length = np.linalg.norm(vec_scaled)
@@ -444,7 +428,7 @@ class CrystalVisualization:
 
             # Create arrow with appropriate length and orientation
             # Use scaled shaft_radius proportional to vector length for better visibility
-            shaft_radius = max(0.001, length * 0.01)
+            shaft_radius = max(0.001, length * 0.03)
             cone_scale = shaft_radius * 5.0  # Maintain ~5:1 ratio
 
             vec_arrow = create_arrow(
@@ -455,8 +439,8 @@ class CrystalVisualization:
                 color=colors[vec_name],
             )
 
-            # Set q to position arrow at origin with correct orientation:
-            # [x, y, z, phi, theta] = [0, 0, 0, azimuth, polar_angle]
-            vec_arrow.q = np.array([0.0, 0.0, 0.0, phi, theta])
+            # Set q to position arrow at start_pos with correct orientation:
+            # [x, y, z, phi, theta] = [start_x, start_y, start_z, azimuth, polar_angle]
+            vec_arrow.q = np.array([start_pos[0], start_pos[1], start_pos[2], phi, theta])
 
             self.env.add(vec_arrow)

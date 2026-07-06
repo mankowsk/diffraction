@@ -1,1 +1,64 @@
-{"name": "Sr2IrO4_RT", "unit_cell": {"name": "Sr2IrO4_RT", "a": 5.4994, "b": 5.4994, "c": 25.78409, "alpha": 90, "beta": 90, "gamma": 90}, "constraints": {"mu": null, "eta": null, "chi": null, "phi": null, "delta": null, "gamma": null, "a_eq_b": null, "bin_eq_bout": null, "betain": null, "betaout": null, "qaz": null, "naz": null, "alpha": null, "beta": null, "bisect": null, "psi": null, "omega": null}, "orientations": [{"hkl": [0, 0, 1], "xyz": [0, 0, 1], "tag": "out of plane"}, {"hkl": [1, 0, 0], "xyz": [0, 1, 0], "tag": "along beam"}], "reflections": [], "u_matrix": null, "ub_matrix": null, "xu_cif_path": "diffraction/dataSr2IrO4_RT.cif", "phonons": {}}
+{
+  "constraints": {
+    "a_eq_b": null,
+    "alpha": null,
+    "beta": null,
+    "betain": null,
+    "betaout": null,
+    "bin_eq_bout": null,
+    "bisect": null,
+    "chi": null,
+    "delta": null,
+    "eta": null,
+    "gamma": null,
+    "mu": null,
+    "naz": null,
+    "omega": null,
+    "phi": null,
+    "psi": null,
+    "qaz": null
+  },
+  "name": "Sr2IrO4_RT",
+  "orientations": [
+    {
+      "hkl": [
+        0,
+        0,
+        1
+      ],
+      "tag": "out of plane",
+      "xyz": [
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "hkl": [
+        1,
+        0,
+        0
+      ],
+      "tag": "along beam",
+      "xyz": [
+        0,
+        1,
+        0
+      ]
+    }
+  ],
+  "phonons": {},
+  "reflections": [],
+  "u_matrix": null,
+  "ub_matrix": null,
+  "unit_cell": {
+    "a": 5.4994,
+    "alpha": 90,
+    "b": 5.4994,
+    "beta": 90,
+    "c": 25.78409,
+    "gamma": 90,
+    "name": "Sr2IrO4_RT"
+  },
+  "xu_cif_path": null
+}
