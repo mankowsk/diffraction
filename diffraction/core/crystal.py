@@ -1,5 +1,7 @@
 """Crystal class for X-ray diffraction calculations."""
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 from diffcalc.hkl.calc import HklCalculation
@@ -226,19 +228,21 @@ class Crystal:
             return None
         return hkl
 
-    def add_phonon(self, name: str, vectors: np.ndarray | list[list[float]], atom_names: list[str] | None = None, frequency: float | None = None) -> None:
-        """Add a phonon displacement mode for structure factor calculations.
+    def add_phonon(self, name: str, vectors: np.ndarray | list[list[float]], **kwargs: Any) -> None:
+        """Add a phonon mode for structure factor calculations.
+
+        Convenience wrapper around :meth:`PhononsManager.add_mode`.
 
         Args:
             name: Identifier for the phonon mode
-            vectors: Array of displacement vectors (shape: n_atoms x 3)
-            atom_names: Optional list of atom names for labeling
-            frequency: Mode frequency in THz or cm^-1
+            vectors: Array of vectors (shape: n_atoms x 3)
+            **kwargs: Passed to ``PhononsManager.add_mode`` (``coords``, ``kind``,
+                ``frame_lattice``, ``masses``, ``atom_names``, ``frequency``, ``q``, ``check``)
 
         Raises:
             ValueError: If vectors shape doesn't match number of atoms in crystal
         """
-        self.phonons.add_mode(name=name, vectors=vectors, atom_names=atom_names, frequency=frequency)
+        self.phonons.add_mode(name, vectors, **kwargs)
 
     def delete_phonon(self, name: str) -> None:
         """Remove a phonon mode from the crystal.
@@ -277,31 +281,37 @@ class Crystal:
         Args:
             hkl: Miller indices (h, k, l)
             energy: X-ray energy in eV for form factor calculation
-            phonon_name: Name of the phonon displacement mode
-            amplitude: Displacement amplitude (scalar or array-like per atom)
+            phonon_name: Name of the phonon displacement mode (Gamma-point modes only)
+            amplitude: Normal coordinate Q in Angstrom * sqrt(amu), scalar or array of
+                values. Use ``mode.amplitude_for_max_displacement(d)`` to convert from a
+                maximum atomic displacement d in Angstrom.
 
         Returns:
-            complex or ndarray: Structure factor amplitude(s) with displaced atoms
+            complex or ndarray: Structure factor amplitude (scalar amplitude) or one
+            amplitude per entry of ``amplitude``
 
         Raises:
-            ValueError: If phonon mode not found or xrayutilities objects not initialized
+            KeyError: If the phonon mode is not found
+            ValueError: If the mode is not at Gamma or xrayutilities objects are not initialized
         """
-        if phonon_name not in self.phonons._modes:
-            raise ValueError(f"Phonon mode '{phonon_name}' not found.")
+        mode = self.phonons.get_mode(phonon_name)
         if self.xucalc is None or self.xu_lattice is None:
             raise ValueError("xrayutilities Crystal and SGLattice must be set for structure factor calculation.")
 
-        amplitude = np.asarray(amplitude)
+        displacement = mode.real_displacement_reduced()
+        scalar = np.ndim(amplitude) == 0
+        amplitude = np.atleast_1d(np.asarray(amplitude, dtype=float))
         q = self.xucalc.Q(hkl)
 
         F = []
         for i, atompos in enumerate(self.xucalc.lattice._wbase):
-            u = atompos[1][1]
-            displaced_u = u + amplitude[:, np.newaxis] * self.phonons._modes[phonon_name].vectors[i]
+            u = np.asarray(atompos[1][1], dtype=float)
+            displaced_u = u + amplitude[:, np.newaxis] * displacement[i]
             f = atompos[0].f(np.linalg.norm(q), energy)
             F.append(f * np.exp(-2 * np.pi * 1j * np.dot(hkl, displaced_u.T)).T)
 
-        return np.sum(np.array(F), axis=0)
+        F_total = np.sum(np.array(F), axis=0)
+        return complex(F_total[0]) if scalar else F_total
 
     def en2lam(self, en: float) -> float:
         """Convert X-ray energy to wavelength.
@@ -377,8 +387,8 @@ class Crystal:
             mode_name: Name of the phonon mode to visualize (default None uses first mode)
             scale: Global scaling factor for visualization and displacements
             dt: Time step in seconds for animation (default 0.05)
-            amplitudes: Array of amplitude values over time (n_modes x n_timepoints).
-                       If None, only shows static view.
+            amplitudes: Normal coordinate Q (Angstrom * sqrt(amu)) over time.
+                       If None, a default sine animation is shown.
 
         Raises:
             ValueError: If xucalc is not initialized or no phonon modes registered

@@ -26,6 +26,8 @@ class CrystalVisualization:
     Attributes:
         crystal: The Crystal object to visualize
         multiplicity: List of atom multiplicities per unique site
+        site_index: Maps each atom identifier to the index of its lattice site; periodic
+            images of a site on the cell boundary share the same index
         atoms: Dictionary mapping atom identifiers to Robot objects
         planes: Dictionary mapping plane indices to Robot objects
         scale: Scaling factor for visualization (default 0.1)
@@ -61,6 +63,7 @@ class CrystalVisualization:
         self.crystal = crystal
         self.multiplicity: list[int] = []
         self.atoms: dict[str, object] = {}
+        self.site_index: dict[str, int] = {}
         self.planes: dict[int, object] = {}
         self.scale = scale
         self.offset = offset if offset is not None else np.array([0.0, 0.0, 0.1])
@@ -99,8 +102,7 @@ class CrystalVisualization:
             ) from e
 
         multiplicity = []
-        prevname = ""
-        num = 1
+        element_count: dict[str, int] = {}
 
         lattice_sites = list(self.crystal.xucalc.lattice.base())
 
@@ -110,13 +112,10 @@ class CrystalVisualization:
                 "Ensure the CIF file contains valid atomic positions."
             )
 
-        for a, pos, occ, _ in lattice_sites:
-            # Track multiplicity within each unique site
-            if a.name == prevname:
-                num += 1
-            else:
-                prevname = a.name
-                num = 1
+        for site, (a, pos, occ, _) in enumerate(lattice_sites):
+            # Number the sites per element, e.g. O1, O2, ...
+            element_count[a.name] = element_count.get(a.name, 0) + 1
+            num = element_count[a.name]
 
             mult = 0
             for i in range(-1, 2):
@@ -151,6 +150,7 @@ class CrystalVisualization:
                                 radius=a.radius * self.scale / 3 if hasattr(a, "radius") else None,
                             )
                             self.atoms[atom_id] = sphere
+                            self.site_index[atom_id] = site
 
                             multiplicity.append(mult)
 
@@ -250,11 +250,16 @@ class CrystalVisualization:
         time-varying displacements to each atom based on the provided vectors
         and amplitude profiles.
 
+        Displacements are given per lattice site and applied to all periodic
+        images of that site. They are scaled like the atomic positions
+        (``self.scale``), so the animated geometry is true to scale.
+
         Args:
-            vectors: List of displacement vectors, one per atom (shape: n_atoms x 3)
+            vectors: List of Cartesian displacement vectors in Angstrom, one array per
+                mode (shape: n_sites x 3)
             amplitudes: List of amplitude arrays over time (n_modes x n_timepoints)
             dt: Time step in seconds for the animation (default 0.05)
-            scale: Global scaling factor for displacements
+            scale: Additional exaggeration factor for the displacements (default 1.0)
 
         Raises:
             VisualizationError: If SWIFT environment is not initialized.
@@ -278,14 +283,21 @@ class CrystalVisualization:
                 "SWIFT environment not initialized. Call show() before animate()."
             )
 
+        n_sites = len(set(self.site_index.values()))
+        if np.shape(vectors)[1] != n_sites:
+            raise ValueError(
+                f"Displacement vectors have {np.shape(vectors)[1]} atoms, "
+                f"but the visualization has {n_sites} lattice sites."
+            )
+
         # Transpose to iterate over time steps
         for amplitude_step in np.asarray(amplitudes).T:
             # Compute total displacement as weighted sum of all mode vectors
             dq = np.sum([vec * amp for vec, amp in zip(vectors, amplitude_step)], axis=0)
 
-            # Apply displacements to each atom
-            for atom, dqa in zip(self.atoms.values(), dq):
-                atom.q = atom.q0 + dqa * scale
+            # Apply the displacement of each site to all its periodic images
+            for atom_id, atom in self.atoms.items():
+                atom.q = atom.q0 + dq[self.site_index[atom_id]] * self.scale * scale
 
             self.env.step(dt=dt)
 

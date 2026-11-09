@@ -69,7 +69,7 @@ diffraction/
 | `calc_angles(h, k, l, energy)` | Get diffractometer angles for a reflection |
 | `calc_hkl(mu, delta, gamma, eta, chi, phi, energy)` | Find hkl from measured angles |
 | `fit_ub(indices, refine_lattice)` | Refine UB matrix using reference reflections |
-| `add_phonon(name, vectors)` / `delete_phonon(name)` | Manage phonon displacement modes |
+| `add_phonon(name, vectors, **kwargs)` / `delete_phonon(name)` | Manage phonon modes |
 | `calc_structure_factor(hkl, energy)` | Calculate static structure factor |
 | `calc_structure_factor_displaced(...)` | Calculate F with atomic displacements |
 | `save(basepath)` / `load(name, basepath)` | Save/load crystal as JSON |
@@ -77,18 +77,22 @@ diffraction/
 ## Phonons Module
 
 ```python
-from diffraction.phonons import (
-    load_phonon_from_dft,
-    normalize_phonon_mode,
-    filter_phonon_by_frequency,
-)
+from diffraction import Crystal
 
-# Load phonon from DFT calculation
-vectors = np.random.rand(4, 3) * 0.1
-phonon_data = load_phonon_from_dft(vectors, atom_names=["Sr", "Ti", "O", "O"])
+crystal = Crystal.from_cif("LiNbO3", "diffraction/data/LiNbO3.cif")
 
-# Normalize mode
-normalized = normalize_phonon_mode(vectors, target_amplitude=1.0)
+# Import all Gamma-point modes from a phonopy calculation (band.yaml with eigenvectors)
+summary = crystal.phonons.add_from_dft("band.yaml")
+print(summary)  # frequency, acoustic flag and center-of-mass check per mode
+
+# Add a user-defined mode; declare the convention of the input vectors
+crystal.phonons.add_mode("soft_mode", vectors, coords="reduced", kind="displacement")
+
+# Modes are stored as mass-normalized displacements (sum m|u|^2 = 1) in reduced
+# coordinates; amplitudes are normal coordinates Q in Angstrom * sqrt(amu)
+mode = crystal.phonons.get_mode("soft_mode")
+Q = mode.amplitude_for_max_displacement(0.1)  # largest atom moves 0.1 Angstrom
+F = crystal.calc_structure_factor_displaced((1, 0, 0), 9000, "soft_mode", Q)
 ```
 
 ## Visualization Module

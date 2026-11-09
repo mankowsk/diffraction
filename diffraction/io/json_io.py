@@ -52,12 +52,7 @@ def _save_to_disk(crystal: Any, path: str) -> None:
     xu_cif_path = os.path.splitext(path)[0] + ".cif"
     json_path = os.path.splitext(path)[0] + ".json"
 
-    data = _serialize_crystal(crystal)
-
-    with open(json_path, "w") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
-        f.write("\n")  # Trailing newline for POSIX compliance and readability
-
+    # Update xu_cif_path before serializing so JSON captures the new path
     if crystal.xucalc is not None and crystal.xu_cif_path is not None:
         if not xu_cif_path == crystal.xu_cif_path:
             shutil.copy2(crystal.xu_cif_path, xu_cif_path)
@@ -65,6 +60,12 @@ def _save_to_disk(crystal: Any, path: str) -> None:
     elif crystal.xucalc is not None and crystal.xu_cif_path is None:
         crystal.xu_cif_path = xu_cif_path
         crystal.xucalc.toCIF(xu_cif_path)
+
+    data = _serialize_crystal(crystal)
+
+    with open(json_path, "w") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+        f.write("\n")  # Trailing newline for POSIX compliance and readability
 
 
 def _serialize_crystal(crystal: Any) -> dict[str, Any]:
@@ -159,14 +160,26 @@ def _restore_state(crystal: Any, data: dict[str, Any]) -> None:
         crystal.xu_cif_path = data["xu_cif_path"]
 
     if "phonons" in data:
-        from diffraction.phonons.manager import PhononMode
+        import warnings
+        from diffraction.phonons.modes import PhononMode
 
         for name, mode_data in data["phonons"].items():
-            phonon_mode = PhononMode.from_dict(mode_data)
-            crystal.phonons.add_mode(
-                name=name,
-                vectors=phonon_mode.vectors,
-                atom_names=phonon_mode.atom_names,
-                frequency=phonon_mode.frequency,
-            )
+            if "displacement" in mode_data:
+                crystal.phonons.add(PhononMode.from_dict(mode_data))
+            else:
+                # Legacy format: unnormalized displacements in reduced coordinates
+                warnings.warn(
+                    f"Phonon mode '{name}' uses the legacy format and was converted to a "
+                    "mass-normalized displacement; amplitudes are now normal coordinates "
+                    "Q in Angstrom * sqrt(amu). Save the crystal to store the new format.",
+                    stacklevel=3,
+                )
+                crystal.phonons.add_mode(
+                    name,
+                    mode_data["vectors"],
+                    coords="reduced",
+                    kind="displacement",
+                    frequency=mode_data.get("frequency"),
+                    check="warn",
+                )
 
