@@ -172,6 +172,24 @@ class LabVisualization(SwiftScene):
         self._q_length = length
         self.shapes["Q"] = self._q_pool[length]
 
+    #: Default camera relative to the sample (SWIFT frame): upstream and above the beam,
+    #: looking downstream onto the sample
+    CAMERA_POSITION = np.array([-1.0, 0.0, 0.2])
+    CAMERA_LOOK_AT = np.array([0.0, 0.0, -0.05])
+
+    def set_camera(self, position: Any = None, look_at: Any = None) -> None:
+        """Set the camera; without arguments the default view (upstream, above the beam).
+
+        Args:
+            position: Camera position in scene coordinates (default: sample + ``CAMERA_POSITION``)
+            look_at: Point the camera looks at (default: sample + ``CAMERA_LOOK_AT``)
+        """
+        if position is None:
+            position = self.origin + self.CAMERA_POSITION
+        if look_at is None:
+            look_at = self.origin + self.CAMERA_LOOK_AT
+        self.env.set_camera_pose(list(position), list(look_at))
+
     def show(self, angles: Any = None, browser: str | None = None) -> "LabVisualization":
         """Launch SWIFT and draw the scene.
 
@@ -191,6 +209,7 @@ class LabVisualization(SwiftScene):
                     self.env.add(shape)
             for arrow in self._q_pool.values():
                 self.env.add(arrow)
+            self.set_camera()
         self.set_angles(angles if angles is not None else {})
         return self
 
