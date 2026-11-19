@@ -8,9 +8,18 @@ from diffcalc.hkl.calc import HklCalculation
 from diffcalc.hkl.constraints import Constraints
 from diffcalc.hkl.geometry import Position
 from diffcalc.ub import calc as dccalc
+import warnings
+
 import xrayutilities as xu
 
 from diffraction.core.frames import convert
+
+#: |F(hkl)| / |F(000)| below which a reflection counts as systematically absent
+ABSENCE_THRESHOLD = 1e-8
+
+
+class SystematicAbsenceWarning(UserWarning):
+    """Angles were requested for a reflection with vanishing structure factor."""
 
 
 class Crystal:
@@ -196,8 +205,12 @@ class Crystal:
         self.ub_matrix = self.ubcalc.UB
         return ub, lat
 
-    def calc_angles(self, hkl: tuple[int, int, int], energy: float, pandas: bool = True) -> pd.DataFrame | list[dict]:
+    def calc_angles(self, hkl: tuple[int, int, int], energy: float, pandas: bool = True) -> pd.DataFrame | list:
         """Calculate diffractometer angles for a given reflection.
+
+        Warns with :class:`SystematicAbsenceWarning` if the reflection has a vanishing
+        structure factor (e.g. forbidden by lattice centring), since angles are returned
+        for any hkl.
 
         Args:
             hkl: Miller indices (h, k, l) of the reflection
@@ -205,11 +218,24 @@ class Crystal:
             pandas: If True, return results as pandas DataFrame (default True)
 
         Returns:
-            DataFrame or list of dicts: Diffractometer angle solutions for each configuration
+            DataFrame (one row per solution: angles, virtual angles and ``F2`` = |F|^2,
+            None without atomic positions) or the list of (Position, virtual angles)
+            tuples from diffcalc with ``F2`` added to the virtual-angle dicts. ``F2`` is
+            real so rows stay real; the complex F is ``calc_structure_factor(hkl, energy)``
         """
         constraints = Constraints({"nu" if k == "gamma" else k: v for k, v in self.constraints.items()})
         hklcalc = HklCalculation(self.ubcalc, constraints)
         lam = 12398.419843320025 / energy
+
+        F = self.structure_factor_or_none(hkl, energy)
+        F2 = None if F is None else float(abs(F) ** 2)
+        if F is not None and self.is_systematically_absent(hkl, energy):
+            warnings.warn(
+                f"Reflection {tuple(hkl)} is systematically absent (|F| = 0, e.g. forbidden by "
+                "lattice centring); it will not be observed.",
+                SystematicAbsenceWarning,
+                stacklevel=2,
+            )
         result = hklcalc.get_position(*hkl, lam)
         if pandas:
             result = pd.concat(
@@ -229,7 +255,25 @@ class Crystal:
                 ],
                 axis=1,
             ).T
+            result["F2"] = F2
+        else:
+            for _, virtual in result:
+                virtual["F2"] = F2
         return result
+
+    def structure_factor_or_none(self, hkl: tuple[int, int, int], energy: float) -> complex | None:
+        """Structure factor F(hkl), or None if no atomic positions (CIF) are available."""
+        if self.xucalc is None or self.xu_lattice is None:
+            return None
+        return complex(self.calc_structure_factor(tuple(hkl), energy))
+
+    def is_systematically_absent(self, hkl: tuple[int, int, int], energy: float) -> bool | None:
+        """True if |F(hkl)| vanishes (relative to |F(000)|); None without atomic positions."""
+        F = self.structure_factor_or_none(hkl, energy)
+        if F is None:
+            return None
+        F000 = abs(self.calc_structure_factor((0, 0, 0), energy))
+        return abs(F) <= ABSENCE_THRESHOLD * F000
 
     def calc_lab_geometry(self, angles: Any, energy: float) -> Any:
         """Scattering geometry in the lab frame for a set of diffractometer angles.
@@ -298,14 +342,13 @@ class Crystal:
         """
         self.phonons.delete_mode(name)
 
-    def _scattering_factors(self, hkl: tuple[int, int, int], energy: float, occupancy: bool, debye_waller: bool) -> list[tuple[complex, np.ndarray]]:
+    def _scattering_factors(self, qnorm: float | np.ndarray, energy: float, occupancy: bool, debye_waller: bool) -> list[tuple[complex | np.ndarray, np.ndarray]]:
         """Effective scattering factor and reduced position of every atom in the cell.
 
         The effective factor is f(|Q|, E), optionally multiplied by the site occupancy
         and the Debye-Waller factor exp(-B |Q|^2 / (4 pi)^2) (same convention as
-        xrayutilities, B in Angstrom^2).
+        xrayutilities, B in Angstrom^2). ``qnorm`` may be an array (one factor per |Q|).
         """
-        qnorm = np.linalg.norm(self.xucalc.Q(hkl))
         factors = []
         for atom, u, occ, b in self.xucalc.lattice.base():
             f = atom.f(qnorm, energy)
@@ -334,8 +377,30 @@ class Crystal:
         """
         if self.xucalc is None or self.xu_lattice is None:
             raise ValueError("xrayutilities Crystal and SGLattice must be set for structure factor calculation.")
-        F = [f * np.exp(-2 * np.pi * 1j * np.dot(hkl, u)) for f, u in self._scattering_factors(hkl, energy, occupancy, debye_waller)]
+        qnorm = np.linalg.norm(self.xucalc.Q(hkl))
+        F = [f * np.exp(-2 * np.pi * 1j * np.dot(hkl, u)) for f, u in self._scattering_factors(qnorm, energy, occupancy, debye_waller)]
         return np.sum(np.array(F))
+
+    def calc_structure_factors(self, hkls: np.ndarray | list, energy: float, occupancy: bool = True, debye_waller: bool = True) -> np.ndarray:
+        """Static structure factors for many reflections at once (vectorized).
+
+        Args:
+            hkls: Miller indices, shape (N, 3)
+            energy: X-ray energy in eV
+            occupancy: Weight each atom by its site occupancy from the CIF
+            debye_waller: Include the Debye-Waller factor (see :meth:`calc_structure_factor`)
+
+        Returns:
+            ndarray: Complex structure factors, shape (N,)
+        """
+        if self.xucalc is None or self.xu_lattice is None:
+            raise ValueError("xrayutilities Crystal and SGLattice must be set for structure factor calculation.")
+        hkls = np.atleast_2d(np.asarray(hkls, dtype=float))
+        qnorm = np.array([np.linalg.norm(self.xucalc.Q(h)) for h in hkls])
+        F = np.zeros(len(hkls), dtype=complex)
+        for f, u in self._scattering_factors(qnorm, energy, occupancy, debye_waller):
+            F += f * np.exp(-2 * np.pi * 1j * (hkls @ u))
+        return F
 
     def calc_structure_factor_displaced(self, hkl: tuple[int, int, int], energy: float, phonon_name: str, amplitude: np.ndarray | list[float] | float, occupancy: bool = True, debye_waller: bool = True) -> complex | np.ndarray:
         """Calculate structure factor with atomic displacements from a phonon mode.
@@ -368,7 +433,8 @@ class Crystal:
         amplitude = np.atleast_1d(np.asarray(amplitude, dtype=float))
 
         F = []
-        for i, (f, u) in enumerate(self._scattering_factors(hkl, energy, occupancy, debye_waller)):
+        qnorm = np.linalg.norm(self.xucalc.Q(hkl))
+        for i, (f, u) in enumerate(self._scattering_factors(qnorm, energy, occupancy, debye_waller)):
             displaced_u = u + amplitude[:, np.newaxis] * displacement[i]
             F.append(f * np.exp(-2 * np.pi * 1j * np.dot(hkl, displaced_u.T)).T)
 
@@ -448,6 +514,23 @@ class Crystal:
         from diffraction.visualization.lab_view import LabVisualization
 
         return LabVisualization(self, energy, **kwargs).show(angles, browser=browser)
+
+    def show_reciprocal(self, angles: Any = None, energy: float = 9000.0, browser: str | None = None, **kwargs: Any) -> object:
+        """Show the Ewald sphere and the reciprocal lattice in the lab for a set of angles.
+
+        Args:
+            angles: Diffractometer angles: dict (degrees, ``gamma`` or ``nu``), one row of
+                ``calc_angles(...)`` or a diffcalc ``Position``; default all zero
+            energy: X-ray energy in eV
+            browser: Browser for SWIFT; ``"headless"`` for snapshots (``vis.snapshot``)
+            **kwargs: Passed to ``ReciprocalVisualization`` (``q_max``, ``tolerance``, ...)
+
+        Returns:
+            ReciprocalVisualization: ``vis.set_angles(...)``, ``vis.in_condition()``
+        """
+        from diffraction.visualization.reciprocal_view import ReciprocalVisualization
+
+        return ReciprocalVisualization(self, energy, **kwargs).show(angles, browser=browser)
 
     def show_phonon(
         self,

@@ -8,6 +8,7 @@ from .structure_factor import plot_structure_factor_vs_energy
 from .angular_solutions import plot_angular_solutions
 from .crystal_visualization import CrystalVisualization, VisualizationError
 from .lab_view import LabVisualization
+from .reciprocal_view import ReciprocalVisualization
 from .visual_primitives import (
     sphere,
     cylinder,
@@ -26,6 +27,7 @@ __all__ = [
     "plot_angular_solutions",
     "CrystalVisualization",
     "LabVisualization",
+    "ReciprocalVisualization",
     "sphere",
     "cylinder",
     "cuboid",

@@ -27,7 +27,7 @@ def to_position(angles: Position | Mapping[str, Any]) -> Position:
     """
     if isinstance(angles, Position):
         return angles
-    values = {k: float(angles[k]) for k in angles.keys() if k in ANGLE_NAMES + ("nu",)}
+    values = {k: float(np.real(angles[k])) for k in angles.keys() if k in ANGLE_NAMES + ("nu",)}
     if "gamma" in values:
         values["nu"] = values.pop("gamma")
     return Position(**{k: values.get(k, 0.0) for k in ("mu", "delta", "nu", "eta", "chi", "phi")})
@@ -82,6 +82,35 @@ class LabGeometry:
         for k in ("R_sample", "R_detector"):
             out[k] = convert(getattr(self, k), "diffcalc", frame, kind="rotation")
         return out
+
+    def excitation_error(self, hkls: np.ndarray | list) -> np.ndarray:
+        """Distance of reflections from the Ewald sphere, |G + k_i| - |k_i| (1/Angstrom).
+
+        Zero means the reflection is in diffraction condition; positive values lie outside
+        the sphere. ``hkls`` has shape (N, 3) or (3,).
+        """
+        G = np.atleast_2d(np.asarray(hkls, dtype=float)) @ self.reciprocal_lattice.T
+        return np.linalg.norm(G + self.k_i, axis=1) - np.linalg.norm(self.k_i)
+
+
+    def detector_angles(self, hkls: np.ndarray | list) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Detector angles at which reflections would appear at the current sample angles.
+
+        The scattered beam is k_f = G + k_i, projected onto the Ewald sphere (exact for
+        reflections in diffraction condition). With diffcalc's detector rotation
+        k_f / k = (sin delta, cos delta cos nu, cos delta sin nu); the branch with
+        |delta| <= 90 deg is returned (equivalent: 180 - delta, nu + 180).
+
+        Returns:
+            tuple: (delta, gamma (= nu), two_theta) in degrees, each of shape (N,)
+        """
+        G = np.atleast_2d(np.asarray(hkls, dtype=float)) @ self.reciprocal_lattice.T
+        k_f = G + self.k_i
+        u = k_f / np.linalg.norm(k_f, axis=1, keepdims=True)
+        delta = np.degrees(np.arcsin(np.clip(u[:, 0], -1.0, 1.0)))
+        gamma = np.degrees(np.arctan2(u[:, 2], u[:, 1]))
+        two_theta = np.degrees(np.arccos(np.clip(u @ self.k_i / np.linalg.norm(self.k_i), -1.0, 1.0)))
+        return delta, gamma, two_theta
 
 
 def calc_lab_geometry(crystal: "Crystal", angles: Position | Mapping[str, Any], energy: float) -> LabGeometry:

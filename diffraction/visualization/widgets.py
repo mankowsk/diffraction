@@ -1,8 +1,10 @@
-"""Jupyter controls (ipywidgets) for the lab-frame diffraction view."""
+"""Jupyter controls (ipywidgets) for the lab-frame and reciprocal-space views."""
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
 
+from diffraction.visualization.diffraction_scene import DiffractionScene
 from diffraction.visualization.lab_view import LabVisualization
+from diffraction.visualization.reciprocal_view import ReciprocalVisualization
 
 if TYPE_CHECKING:
     from diffraction.core.crystal import Crystal
@@ -10,37 +12,33 @@ if TYPE_CHECKING:
 SLIDER_ANGLES = ("mu", "eta", "chi", "phi", "gamma", "delta")
 
 
-def lab_view_widget(
+def angle_controls(
     crystal: "Crystal",
     energy: float,
+    views: DiffractionScene | Sequence[DiffractionScene],
     hkl: tuple[int, int, int] | None = None,
-    browser: str | None = "notebook",
-    vis: LabVisualization | None = None,
-) -> tuple[LabVisualization, Any]:
-    """Lab view with sliders for the angles and a selector for ``calc_angles`` solutions.
+) -> Any:
+    """Sliders for the angles, energy and a selector for ``calc_angles`` solutions.
 
-    In a notebook cell::
-
-        vis, controls = lab_view_widget(crystal, 7500, hkl=(0, 0, 15))
-        controls
+    All ``views`` (e.g. a lab view and a reciprocal-space view) move together.
 
     Args:
         crystal: Crystal with a UB matrix
         energy: X-ray energy in eV
+        views: One or several views (``LabVisualization``, ``ReciprocalVisualization``)
         hkl: Reflection whose ``calc_angles`` solutions are offered initially (optional)
-        browser: SWIFT browser (default ``"notebook"``: scene embedded in the cell output)
-        vis: Existing :class:`LabVisualization` to control instead of creating one
 
     Returns:
-        tuple: (LabVisualization, ipywidgets.VBox with the controls)
+        ipywidgets.VBox with the controls
     """
     import ipywidgets as w
 
-    if vis is None:
-        vis = LabVisualization(crystal, energy).show(browser=browser)
+    views = [views] if isinstance(views, DiffractionScene) else list(views)
+    # The reciprocal view's summary includes the reflections in diffraction condition
+    reporter = next((v for v in views if isinstance(v, ReciprocalVisualization)), views[0])
 
     sliders = {
-        name: w.FloatSlider(value=vis.angles[name], min=-180, max=180, step=0.01, description=name,
+        name: w.FloatSlider(value=views[0].angles[name], min=-180, max=180, step=0.01, description=name,
                             continuous_update=False, readout_format=".2f", layout=w.Layout(width="420px"))
         for name in SLIDER_ANGLES
     }
@@ -52,14 +50,14 @@ def lab_view_widget(
     readout = w.HTML()
     state = {"updating": False, "rows": []}
 
-    def refresh_readout():
-        readout.value = "<pre>" + vis.summary() + "</pre>"
+    def set_all(angles=None, **kwargs):
+        for view in views:
+            view.set_angles(angles, **kwargs)
+        readout.value = "<pre>" + reporter.summary() + "</pre>"
 
     def on_slider(_change):
-        if state["updating"]:
-            return
-        vis.set_angles({k: s.value for k, s in sliders.items()})
-        refresh_readout()
+        if not state["updating"]:
+            set_all({k: s.value for k, s in sliders.items()})
 
     def set_sliders(angles):
         state["updating"] = True
@@ -70,8 +68,7 @@ def lab_view_widget(
             state["updating"] = False
 
     def on_energy(_change):
-        vis.set_angles(energy=energy_box.value)
-        refresh_readout()
+        set_all(energy=energy_box.value)
 
     def on_solve(_button=None):
         try:
@@ -95,8 +92,7 @@ def lab_view_widget(
             return
         row = state["rows"][index]
         set_sliders(row)
-        vis.set_angles(row)
-        refresh_readout()
+        set_all(row)
 
     for slider in sliders.values():
         slider.observe(on_slider, names="value")
@@ -104,14 +100,61 @@ def lab_view_widget(
     solve.on_click(on_solve)
     solutions.observe(on_solution, names="value")
 
-    refresh_readout()
+    readout.value = "<pre>" + reporter.summary() + "</pre>"
     if hkl:
         on_solve()
 
-    controls = w.VBox([
-        w.HBox([hkl_box, energy_box, solve]),
-        solutions,
-        *sliders.values(),
-        readout,
-    ])
-    return vis, controls
+    return w.VBox([w.HBox([hkl_box, energy_box, solve]), solutions, *sliders.values(), readout])
+
+
+def lab_view_widget(
+    crystal: "Crystal",
+    energy: float,
+    hkl: tuple[int, int, int] | None = None,
+    browser: str | None = "notebook",
+    vis: LabVisualization | None = None,
+) -> tuple[LabVisualization, Any]:
+    """Lab view with angle controls (see :func:`angle_controls`).
+
+    In a notebook cell::
+
+        vis, controls = lab_view_widget(crystal, 7500, hkl=(0, 0, 15))
+        controls
+
+    Args:
+        crystal: Crystal with a UB matrix
+        energy: X-ray energy in eV
+        hkl: Reflection whose ``calc_angles`` solutions are offered initially (optional)
+        browser: SWIFT browser (default ``"notebook"``: scene embedded in the cell output)
+        vis: Existing :class:`LabVisualization` to control instead of creating one
+
+    Returns:
+        tuple: (LabVisualization, ipywidgets.VBox with the controls)
+    """
+    if vis is None:
+        vis = LabVisualization(crystal, energy).show(browser=browser)
+    return vis, angle_controls(crystal, energy, vis, hkl)
+
+
+def reciprocal_view_widget(
+    crystal: "Crystal",
+    energy: float,
+    hkl: tuple[int, int, int] | None = None,
+    browser: str | None = "notebook",
+    vis: ReciprocalVisualization | None = None,
+) -> tuple[ReciprocalVisualization, Any]:
+    """Reciprocal-space (Ewald) view with angle controls (see :func:`angle_controls`).
+
+    Args:
+        crystal: Crystal with a UB matrix
+        energy: X-ray energy in eV
+        hkl: Reflection whose ``calc_angles`` solutions are offered initially (optional)
+        browser: SWIFT browser (default ``"notebook"``)
+        vis: Existing :class:`ReciprocalVisualization` to control instead of creating one
+
+    Returns:
+        tuple: (ReciprocalVisualization, ipywidgets.VBox with the controls)
+    """
+    if vis is None:
+        vis = ReciprocalVisualization(crystal, energy).show(browser=browser)
+    return vis, angle_controls(crystal, energy, vis, hkl)

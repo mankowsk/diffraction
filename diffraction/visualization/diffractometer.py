@@ -14,12 +14,12 @@ The default model is stored as ``models/diffractometer_4s2d.urdf``; regenerate i
 ``python -m diffraction.visualization.diffractometer``.
 """
 
-import struct
 from pathlib import Path
 
 import numpy as np
 
 from diffraction.core.frames import convert
+from diffraction.visualization.meshes import write_stl
 
 MODELS_DIR = Path(__file__).resolve().parent / "models"
 URDF_FILE = "diffractometer_4s2d.urdf"
@@ -184,22 +184,10 @@ def chi_arc_triangles(radius: float, width: float, thickness: float = 0.02, n: i
     return np.array(tris)
 
 
-def write_stl(path: str | Path, triangles: np.ndarray) -> None:
-    """Write triangles (N, 3, 3) as binary STL."""
-    with open(path, "wb") as f:
-        f.write(b"diffraction chi arc".ljust(80, b"\0"))
-        f.write(struct.pack("<I", len(triangles)))
-        for tri in triangles:
-            normal = np.cross(tri[1] - tri[0], tri[2] - tri[0])
-            norm = np.linalg.norm(normal)
-            normal = normal / norm if norm > 0 else normal
-            f.write(struct.pack("<12fH", *normal, *tri.ravel(), 0))
-
-
 def write_default_model() -> None:
     """Regenerate ``models/chi_arc.stl`` and ``models/diffractometer_4s2d.urdf``."""
     d = DEFAULT_DIMENSIONS
-    write_stl(MODELS_DIR / CHI_ARC_FILE, chi_arc_triangles(d["chi_radius"], d["chi_width"]))
+    write_stl(MODELS_DIR / CHI_ARC_FILE, chi_arc_triangles(d["chi_radius"], d["chi_width"]), b"diffraction chi arc")
     # Mesh referenced relative to the URDF so the file is portable
     (MODELS_DIR / URDF_FILE).write_text(make_diffractometer_urdf(chi_arc_mesh=CHI_ARC_FILE))
 
