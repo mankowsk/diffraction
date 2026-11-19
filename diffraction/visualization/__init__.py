@@ -7,6 +7,7 @@ from .ub_refinement import plot_ub_refinement
 from .structure_factor import plot_structure_factor_vs_energy
 from .angular_solutions import plot_angular_solutions
 from .crystal_visualization import CrystalVisualization, VisualizationError
+from .lab_view import LabVisualization
 from .visual_primitives import (
     sphere,
     cylinder,
@@ -24,6 +25,7 @@ __all__ = [
     "plot_structure_factor_vs_energy",
     "plot_angular_solutions",
     "CrystalVisualization",
+    "LabVisualization",
     "sphere",
     "cylinder",
     "cuboid",

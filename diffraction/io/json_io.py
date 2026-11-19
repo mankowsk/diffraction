@@ -82,6 +82,7 @@ def _serialize_crystal(crystal: Any) -> dict[str, Any]:
         "unit_cell": crystal.unit_cell,
         "constraints": crystal.constraints,
         "orientations": crystal.orientations,
+        "surface_normal": crystal.surface_normal,
         "reflections": [
             {"hkl": r["hkl"], "position": list(r["position"].asdict.values()), "energy": r["energy"], "tag": r.get("tag")}
             for r in crystal.reflections
@@ -140,7 +141,18 @@ def _restore_state(crystal: Any, data: dict[str, Any]) -> None:
 
     crystal.constraints = data["constraints"]
     for ori in data["orientations"]:
-        crystal.add_orientation(ori["hkl"], ori["xyz"], ori.get("tag"))
+        if "frame" not in ori:
+            import warnings
+
+            warnings.warn(
+                f"Orientation {ori['hkl']} ({ori.get('tag')}) has no 'frame' (legacy format); "
+                "interpreting xyz in the diffcalc frame. Re-save the crystal to update the file.",
+                stacklevel=2,
+            )
+        crystal.add_orientation(ori["hkl"], ori["xyz"], ori.get("tag"), frame=ori.get("frame", "diffcalc"))
+    if data.get("surface_normal") is not None:
+        sn = data["surface_normal"]
+        crystal.set_surface_normal(sn["vector"], kind=sn["kind"], frame=sn["frame"])
     for refl in data["reflections"]:
         crystal.add_reflection(refl["hkl"], Position(*refl["position"]), refl["energy"], refl.get("tag"))
 

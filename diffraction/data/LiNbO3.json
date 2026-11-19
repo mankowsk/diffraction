@@ -21,6 +21,7 @@
   "name": "LiNbO3",
   "orientations": [
     {
+      "frame": "diffcalc",
       "hkl": [
         1,
         -1,
@@ -34,6 +35,7 @@
       ]
     },
     {
+      "frame": "diffcalc",
       "hkl": [
         1,
         1,

@@ -21,8 +21,8 @@ class PhononsManager:
 
     All modes are stored as :class:`PhononMode` in canonical form
     (mass-normalized displacement in reduced coordinates of the crystal lattice).
-    Phonon modes require a CIF with all atoms of the cell listed explicitly
-    (space group P1), in the same order as the phonon vectors.
+    Phonon vectors are indexed like the atoms of the full unit cell, i.e. in the
+    order of ``crystal.xucalc.lattice.base()`` (symmetry-expanded CIF sites).
 
     Attributes:
         crystal: Reference to the parent Crystal object
@@ -181,20 +181,20 @@ class PhononsManager:
         if self.crystal.xucalc is None:
             return None
 
-        return [site[0].basename for site in self.crystal.xucalc.lattice._wbase]
+        return [site[0].basename for site in self.crystal.xucalc.lattice.base()]
 
     def _get_n_atoms(self) -> int:
         """Get the number of atoms in the crystal unit cell.
 
         Returns:
-            int: Number of unique atomic sites
+            int: Number of atoms in the unit cell
 
         Raises:
             ValueError: If xucalc is not initialized
         """
         if self.crystal.xucalc is None:
             raise ValueError("Crystal must be loaded from CIF file to determine atom count.")
-        return len(self.crystal.xucalc.lattice._wbase)
+        return sum(1 for _ in self.crystal.xucalc.lattice.base())
 
     def get_lattice(self) -> np.ndarray:
         """Real-space lattice of the crystal (rows a1, a2, a3) in Angstrom.
@@ -215,20 +215,11 @@ class PhononsManager:
         """
         if self.crystal.xucalc is None:
             raise ValueError("Crystal must be loaded from CIF file to determine atomic masses.")
-        return np.array([atom[0].weight / AMU_KG for atom in self.crystal.xucalc.lattice._wbase])
+        return np.array([atom[0].weight / AMU_KG for atom in self.crystal.xucalc.lattice.base()])
 
     def _get_sites(self) -> tuple[list[str], np.ndarray]:
-        """Element symbols and reduced positions of all atoms in the cell.
-
-        Raises:
-            ValueError: If the CIF does not list all atoms explicitly (non-P1)
-        """
+        """Element symbols and reduced positions of all atoms in the cell."""
         sites = list(self.crystal.xucalc.lattice.base())
-        if len(sites) != self._get_n_atoms():
-            raise ValueError(
-                "Phonon import requires a CIF listing all atoms of the cell explicitly (P1); "
-                f"found {self._get_n_atoms()} unique sites but {len(sites)} atoms."
-            )
         species = [site[0].name for site in sites]
         positions = np.array([site[1] for site in sites], dtype=float)
         return species, positions

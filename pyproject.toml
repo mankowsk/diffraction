@@ -33,6 +33,11 @@ visualization = [
     "roboticstoolbox-python @ git+https://github.com/PhilFreeman/robotics-toolbox-python.git",
 ]
 
+# Optional: headless rendering of SWIFT scenes to PNG (CrystalVisualization.snapshot)
+headless = [
+    "playwright",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["diffraction*"]

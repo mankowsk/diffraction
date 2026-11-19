@@ -7,16 +7,13 @@ and phonon mode animations using SWIFT and the Robotics Toolbox.
 import numpy as np
 from typing import TYPE_CHECKING
 
+from diffraction.visualization.scene import SwiftScene, VisualizationError
+
 if TYPE_CHECKING:
     from diffraction.core.crystal import Crystal
 
 
-class VisualizationError(Exception):
-    """Base exception for visualization-related errors."""
-    pass
-
-
-class CrystalVisualization:
+class CrystalVisualization(SwiftScene):
     """Interactive 3D visualization of crystal structures.
 
     This class provides tools for visualizing unit cells, atomic positions,
@@ -60,6 +57,7 @@ class CrystalVisualization:
         Raises:
             VisualizationError: If the crystal's xucalc attribute is None.
         """
+        super().__init__()
         self.crystal = crystal
         self.multiplicity: list[int] = []
         self.atoms: dict[str, object] = {}
@@ -67,7 +65,7 @@ class CrystalVisualization:
         self.planes: dict[int, object] = {}
         self.scale = scale
         self.offset = offset if offset is not None else np.array([0.0, 0.0, 0.1])
-        self.env = None
+        self.default_look_at = self.offset
 
         if self.crystal.xucalc is None:
             raise VisualizationError(
@@ -218,22 +216,18 @@ class CrystalVisualization:
         The visualization window allows rotation, zooming, and panning of the
         3D crystal structure.
 
+        Args:
+            browser: Browser passed to SWIFT (e.g. ``"notebook"``, ``"firefox"``; default:
+                system browser). ``"headless"`` renders in a headless Chrome without a
+                window (requires Playwright); use :meth:`snapshot` to save images.
+
         Raises:
             VisualizationError: If SWIFT cannot be imported or initialized.
         """
-        try:
-            import swift
-        except ImportError:
-            raise VisualizationError(
-                "SWIFT not installed. Install with:\n"
-                "  pip install git+https://github.com/mankowsk/swift.git"
-            )
-
         if self.env is not None:
             self.env.reset()
         else:
-            self.env = swift.Swift()
-            self.env.launch(realtime=True, browser=browser)
+            self._launch(browser)
 
         self.add_atoms()
 
@@ -420,6 +414,12 @@ class CrystalVisualization:
             ("a3", self.crystal.xucalc.a3),
         ]
 
+        # Same thickness for all arrows, set by the shortest lattice vector, so that
+        # anisotropic cells (e.g. c >> a) don't get a disproportionately thick arrow
+        min_length = min(np.linalg.norm(vec) for _, vec in lattice_vectors) * self.scale
+        shaft_radius = max(0.001, min_length * 0.03)
+        cone_scale = shaft_radius * 5.0  # Maintain ~5:1 ratio
+
         for vec_name, vec in lattice_vectors:
             # Scale the vector and apply offset to start position
             vec_scaled = np.array(vec) * self.scale
@@ -437,11 +437,6 @@ class CrystalVisualization:
 
             # theta = polar angle from +z axis
             theta = np.arccos(np.clip(vec_scaled[2] / length, -1.0, 1.0))
-
-            # Create arrow with appropriate length and orientation
-            # Use scaled shaft_radius proportional to vector length for better visibility
-            shaft_radius = max(0.001, length * 0.03)
-            cone_scale = shaft_radius * 5.0  # Maintain ~5:1 ratio
 
             vec_arrow = create_arrow(
                 name=f"lattice_{vec_name}",

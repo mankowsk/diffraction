@@ -32,9 +32,7 @@ import spatialgeometry as sg
 import spatialmath as sm
 
 
-class VisualizationError(Exception):
-    """Base exception for visualization-related errors."""
-    pass
+from diffraction.visualization.scene import VisualizationError  # noqa: F401  (re-export)
 
 
 Color = Tuple[float, float, float, float]

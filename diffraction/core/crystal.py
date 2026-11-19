@@ -10,6 +10,8 @@ from diffcalc.hkl.geometry import Position
 from diffcalc.ub import calc as dccalc
 import xrayutilities as xu
 
+from diffraction.core.frames import convert
+
 
 class Crystal:
     """Crystal class for X-ray diffraction calculations.
@@ -57,6 +59,7 @@ class Crystal:
         self.ubcalc = dccalc.UBCalculation("you")
         self.ubcalc.set_lattice(**self.unit_cell)
         self.orientations: list[dict] = []
+        self.surface_normal: dict | None = None
         self.reflections: list[dict] = []
         self.u_matrix: np.ndarray | None = None
         self.ub_matrix: np.ndarray | None = None
@@ -102,16 +105,43 @@ class Crystal:
         crystal.xu_cif_path = path_to_cif
         return crystal
 
-    def add_orientation(self, hkl: tuple[int, int, int], xyz: tuple[float, float, float], tag: str | None = None) -> None:
+    def add_orientation(self, hkl: tuple[int, int, int], xyz: tuple[float, float, float], tag: str | None = None, frame: str = "swissfel") -> None:
         """Add a crystal orientation for UB matrix calculation.
 
         Args:
             hkl: Miller indices (h, k, l) of the reflection
-            xyz: Normalized direction vector in crystal coordinates
+            xyz: Lab direction of ``hkl`` with all diffractometer angles at zero
             tag: Optional identifier for the orientation
+            frame: Lab frame of ``xyz`` (see :mod:`diffraction.core.frames`): ``"swissfel"``
+                (default; x left looking downstream, y up, z along the beam), ``"diffcalc"``
+                (x up, y along the beam, z left) or ``"swift"``
         """
-        self.orientations.append({"hkl": hkl, "xyz": xyz, "tag": tag})
-        self.ubcalc.add_orientation(hkl, xyz, tag=tag)
+        self.orientations.append({"hkl": hkl, "xyz": xyz, "tag": tag, "frame": frame})
+        xyz_diffcalc = convert(xyz, frame, "diffcalc")
+        self.ubcalc.add_orientation(hkl, tuple(float(v) for v in xyz_diffcalc), tag=tag)
+
+    def set_surface_normal(self, vector: tuple[float, float, float], kind: str = "hkl", frame: str = "swissfel") -> None:
+        """Set the sample surface normal used by diffcalc and the lab view.
+
+        diffcalc uses it for the reference constraints ``alpha``/``beta``/``betain``/
+        ``betaout``/``naz`` and :meth:`show_lab` draws the sample slab perpendicular to it.
+        Without this call, diffcalc's default applies: the lab direction (0, 0, 1) of the
+        diffcalc frame at zero angles (horizontal, pointing left looking downstream).
+
+        Args:
+            vector: Reciprocal-lattice vector (``kind="hkl"``, e.g. ``(0, 0, 1)`` for a
+                c-cut sample) or lab direction at zero diffractometer angles (``kind="lab"``)
+            kind: ``"hkl"`` (default) or ``"lab"``
+            frame: Lab frame of ``vector`` for ``kind="lab"`` (default ``"swissfel"``)
+        """
+        if kind not in ("hkl", "lab"):
+            raise ValueError(f"kind must be 'hkl' or 'lab', got '{kind}'")
+        if kind == "hkl":
+            n_ref = tuple(float(v) for v in vector)
+        else:
+            n_ref = tuple(float(v) for v in convert(vector, frame, "diffcalc"))
+        self.ubcalc.surface = dccalc.ReferenceVector(n_ref, kind == "hkl")
+        self.surface_normal = {"vector": [float(v) for v in vector], "kind": kind, "frame": frame}
 
     def add_reflection(self, hkl: tuple[int, int, int], position: Position, energy: float, tag: str | None = None) -> None:
         """Add a reflection measurement for UB matrix calculation.
@@ -201,6 +231,22 @@ class Crystal:
             ).T
         return result
 
+    def calc_lab_geometry(self, angles: Any, energy: float) -> Any:
+        """Scattering geometry in the lab frame for a set of diffractometer angles.
+
+        Args:
+            angles: diffcalc ``Position``, dict of angles in degrees (``gamma`` or ``nu``),
+                or one row of ``calc_angles(...)``, e.g. ``df.iloc[0]``
+            energy: X-ray energy in eV
+
+        Returns:
+            LabGeometry: k_i, k_f, Q, rotated lattice, surface normal, ... in the diffcalc
+            frame; use ``.in_frame("swissfel")`` for SwissFEL coordinates
+        """
+        from diffraction.core.lab_geometry import calc_lab_geometry
+
+        return calc_lab_geometry(self, angles, energy)
+
     def calc_hkl(self, mu: float, delta: float, gamma: float, eta: float, chi: float, phi: float, energy: float) -> tuple[int, int, int] | None:
         """Calculate Miller indices from measured diffractometer angles.
 
@@ -252,12 +298,33 @@ class Crystal:
         """
         self.phonons.delete_mode(name)
 
-    def calc_structure_factor(self, hkl: tuple[int, int, int], energy: float) -> complex:
+    def _scattering_factors(self, hkl: tuple[int, int, int], energy: float, occupancy: bool, debye_waller: bool) -> list[tuple[complex, np.ndarray]]:
+        """Effective scattering factor and reduced position of every atom in the cell.
+
+        The effective factor is f(|Q|, E), optionally multiplied by the site occupancy
+        and the Debye-Waller factor exp(-B |Q|^2 / (4 pi)^2) (same convention as
+        xrayutilities, B in Angstrom^2).
+        """
+        qnorm = np.linalg.norm(self.xucalc.Q(hkl))
+        factors = []
+        for atom, u, occ, b in self.xucalc.lattice.base():
+            f = atom.f(qnorm, energy)
+            if occupancy:
+                f = f * occ
+            if debye_waller:
+                f = f * np.exp(-b * qnorm**2 / (4 * np.pi) ** 2)
+            factors.append((f, np.asarray(u, dtype=float)))
+        return factors
+
+    def calc_structure_factor(self, hkl: tuple[int, int, int], energy: float, occupancy: bool = True, debye_waller: bool = True) -> complex:
         """Calculate the static structure factor F(h,k,l) at a given energy.
 
         Args:
             hkl: Miller indices (h, k, l)
             energy: X-ray energy in eV for form factor calculation
+            occupancy: Weight each atom by its site occupancy from the CIF
+            debye_waller: Include the Debye-Waller factor exp(-B |Q|^2 / (4 pi)^2)
+                using the isotropic B of each site from the CIF
 
         Returns:
             complex: Structure factor amplitude
@@ -267,15 +334,10 @@ class Crystal:
         """
         if self.xucalc is None or self.xu_lattice is None:
             raise ValueError("xrayutilities Crystal and SGLattice must be set for structure factor calculation.")
-        F = []
-        for atompos in self.xucalc.lattice._wbase:
-            u = atompos[1][1]
-            q = self.xucalc.Q(hkl)
-            f = atompos[0].f(np.linalg.norm(q), energy)
-            F.append(f * np.exp(-2 * np.pi * 1j * np.dot(hkl, u)))
+        F = [f * np.exp(-2 * np.pi * 1j * np.dot(hkl, u)) for f, u in self._scattering_factors(hkl, energy, occupancy, debye_waller)]
         return np.sum(np.array(F))
 
-    def calc_structure_factor_displaced(self, hkl: tuple[int, int, int], energy: float, phonon_name: str, amplitude: np.ndarray | list[float] | float) -> complex | np.ndarray:
+    def calc_structure_factor_displaced(self, hkl: tuple[int, int, int], energy: float, phonon_name: str, amplitude: np.ndarray | list[float] | float, occupancy: bool = True, debye_waller: bool = True) -> complex | np.ndarray:
         """Calculate structure factor with atomic displacements from a phonon mode.
 
         Args:
@@ -285,6 +347,9 @@ class Crystal:
             amplitude: Normal coordinate Q in Angstrom * sqrt(amu), scalar or array of
                 values. Use ``mode.amplitude_for_max_displacement(d)`` to convert from a
                 maximum atomic displacement d in Angstrom.
+            occupancy: Weight each atom by its site occupancy from the CIF
+            debye_waller: Include the Debye-Waller factor exp(-B |Q|^2 / (4 pi)^2)
+                using the isotropic B of each site from the CIF
 
         Returns:
             complex or ndarray: Structure factor amplitude (scalar amplitude) or one
@@ -301,13 +366,10 @@ class Crystal:
         displacement = mode.real_displacement_reduced()
         scalar = np.ndim(amplitude) == 0
         amplitude = np.atleast_1d(np.asarray(amplitude, dtype=float))
-        q = self.xucalc.Q(hkl)
 
         F = []
-        for i, atompos in enumerate(self.xucalc.lattice._wbase):
-            u = np.asarray(atompos[1][1], dtype=float)
+        for i, (f, u) in enumerate(self._scattering_factors(hkl, energy, occupancy, debye_waller)):
             displaced_u = u + amplitude[:, np.newaxis] * displacement[i]
-            f = atompos[0].f(np.linalg.norm(q), energy)
             F.append(f * np.exp(-2 * np.pi * 1j * np.dot(hkl, displaced_u.T)).T)
 
         F_total = np.sum(np.array(F), axis=0)
@@ -369,6 +431,23 @@ class Crystal:
         vis.show(browser=browser)
         vis.add_lattice_vectors()
         return vis
+
+    def show_lab(self, angles: Any = None, energy: float = 9000.0, browser: str | None = None, **kwargs: Any) -> object:
+        """Show the diffraction geometry in the lab with a schematic 4S+2D diffractometer.
+
+        Args:
+            angles: Diffractometer angles: dict (degrees, ``gamma`` or ``nu``), one row of
+                ``calc_angles(...)`` or a diffcalc ``Position``; default all zero
+            energy: X-ray energy in eV
+            browser: Browser for SWIFT; ``"headless"`` for snapshots (``vis.snapshot``)
+            **kwargs: Passed to ``LabVisualization`` (drawing sizes, diffractometer dimensions)
+
+        Returns:
+            LabVisualization: Use ``vis.set_angles(...)`` to move the diffractometer
+        """
+        from diffraction.visualization.lab_view import LabVisualization
+
+        return LabVisualization(self, energy, **kwargs).show(angles, browser=browser)
 
     def show_phonon(
         self,
@@ -447,13 +526,18 @@ class Crystal:
 
         if self.xucalc is not None:
             s += f"\n### UNIT CELL ###\n"
-            for i, atom in enumerate(self.xucalc.lattice._wbase):
-                s += f"{i} {atom}\n"
+            for i, (atom, pos, occ, b) in enumerate(self.xucalc.lattice.base()):
+                s += f"{i:<3} {atom.name:4} {np.array2string(np.asarray(pos), precision=4)}  occ={occ}  b={b:.3f}\n"
 
         s += f"\n### ORIENTATIONS ###\n"
-        s += f"{'hkl':15}{'xyz':15}{'tag'}\n"
+        s += f"{'hkl':15}{'xyz':15}{'frame':10}{'tag'}\n"
         for orientation in self.orientations:
-            s += f"{str(orientation['hkl']):15}{str(orientation['xyz']):15}{orientation['tag']}\n"
+            s += f"{str(orientation['hkl']):15}{str(orientation['xyz']):15}{orientation['frame']:10}{orientation['tag']}\n"
+
+        if self.surface_normal is not None:
+            sn = self.surface_normal
+            where = "hkl" if sn["kind"] == "hkl" else f"lab, {sn['frame']}"
+            s += f"\n### SURFACE NORMAL ###\n{tuple(sn['vector'])} ({where})\n"
 
         s += f"\n### CONSTRAINTS ###\n"
         for k, v in self.constraints.items():

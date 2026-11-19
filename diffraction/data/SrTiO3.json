@@ -21,6 +21,7 @@
   "name": "SrTiO3",
   "orientations": [
     {
+      "frame": "diffcalc",
       "hkl": [
         0,
         0,
@@ -34,6 +35,7 @@
       ]
     },
     {
+      "frame": "diffcalc",
       "hkl": [
         0,
         1,
