@@ -4,3 +4,7 @@ __pycache__
 .vscode
 CLAUDE.md
 diffraction/input/
+
+# Private user files (notebooks, data); the folder itself is kept
+user/*
+!user/README.md
