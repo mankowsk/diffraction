@@ -1,0 +1,95 @@
+# SYNTHETIC test fixture in the format of phonopy's irreps.yaml (phonopy/phonon/irreps.py).
+# Degenerate sets follow the band.yaml frequencies; the A1/A2 assignment of the
+# non-degenerate modes is arbitrary (not computed), one label is 'None' on purpose.
+q-position: [    0.0000000,    0.0000000,    0.0000000 ]
+point_group: 3m
+transformation_matrix:
+- [  1.0000000,  0.0000000,  0.0000000 ]
+- [  0.0000000,  1.0000000,  0.0000000 ]
+- [  0.0000000,  0.0000000,  1.0000000 ]
+rotations:
+- matrix:
+  - [  1,  0,  0 ]
+  - [  0,  1,  0 ]
+  - [  0,  0,  1 ]
+normal_modes:
+- band_indices: [ 1 ]
+  frequency: -0.0013145054  
+  ir_label: A1
+  characters: [ [  1,   0.0 ], [  1,   0.0 ], [  1,   0.0 ] ]
+- band_indices: [ 2, 3 ]
+  frequency: 0.0004224703   
+  ir_label: E
+  characters: [ [  2,   0.0 ], [  1, 180.0 ], [  0,   0.0 ] ]
+- band_indices: [ 4, 5 ]
+  frequency: 4.3060645007   
+  ir_label: E
+  characters: [ [  2,   0.0 ], [  1, 180.0 ], [  0,   0.0 ] ]
+- band_indices: [ 6 ]
+  frequency: 6.2644427087   
+  ir_label: A2
+  characters: [ [  1,   0.0 ], [  1,   0.0 ], [  1, 180.0 ] ]
+- band_indices: [ 7, 8 ]
+  frequency: 6.4017211686   
+  ir_label: E
+  characters: [ [  2,   0.0 ], [  1, 180.0 ], [  0,   0.0 ] ]
+- band_indices: [ 9 ]
+  frequency: 7.1573248641   
+  ir_label: A1
+  characters: [ [  1,   0.0 ], [  1,   0.0 ], [  1,   0.0 ] ]
+- band_indices: [ 10, 11 ]
+  frequency: 7.6088079120   
+  ir_label: E
+  characters: [ [  2,   0.0 ], [  1, 180.0 ], [  0,   0.0 ] ]
+- band_indices: [ 12 ]
+  frequency: 8.0659741454   
+  ir_label: A2
+  characters: [ [  1,   0.0 ], [  1,   0.0 ], [  1, 180.0 ] ]
+- band_indices: [ 13 ]
+  frequency: 8.4870770587   
+  ir_label: A1
+  characters: [ [  1,   0.0 ], [  1,   0.0 ], [  1,   0.0 ] ]
+- band_indices: [ 14, 15 ]
+  frequency: 9.4500580014   
+  ir_label: E
+  characters: [ [  2,   0.0 ], [  1, 180.0 ], [  0,   0.0 ] ]
+- band_indices: [ 16 ]
+  frequency: 10.0789420003  
+  ir_label: A2
+  characters: [ [  1,   0.0 ], [  1,   0.0 ], [  1, 180.0 ] ]
+- band_indices: [ 17, 18 ]
+  frequency: 10.5678262130  
+  ir_label: E
+  characters: [ [  2,   0.0 ], [  1, 180.0 ], [  0,   0.0 ] ]
+- band_indices: [ 19, 20 ]
+  frequency: 10.9129000423  
+  ir_label: E
+  characters: [ [  2,   0.0 ], [  1, 180.0 ], [  0,   0.0 ] ]
+- band_indices: [ 21 ]
+  frequency: 11.8571440788  
+  ir_label: A1
+  characters: [ [  1,   0.0 ], [  1,   0.0 ], [  1,   0.0 ] ]
+- band_indices: [ 22, 23 ]
+  frequency: 12.3562487218  
+  ir_label: E
+  characters: [ [  2,   0.0 ], [  1, 180.0 ], [  0,   0.0 ] ]
+- band_indices: [ 24 ]
+  frequency: 13.1079821409  
+  ir_label: A2
+  characters: [ [  1,   0.0 ], [  1,   0.0 ], [  1, 180.0 ] ]
+- band_indices: [ 25, 26 ]
+  frequency: 17.0475531649  
+  ir_label: E
+  characters: [ [  2,   0.0 ], [  1, 180.0 ], [  0,   0.0 ] ]
+- band_indices: [ 27 ]
+  frequency: 18.2301346504  
+  ir_label: A1
+  characters: [ [  1,   0.0 ], [  1,   0.0 ], [  1,   0.0 ] ]
+- band_indices: [ 28, 29 ]
+  frequency: 19.9230085063  
+  ir_label: None
+  characters: [ [  2,   0.0 ], [  1, 180.0 ], [  0,   0.0 ] ]
+- band_indices: [ 30 ]
+  frequency: 26.1057806008  
+  ir_label: A2
+  characters: [ [  1,   0.0 ], [  1,   0.0 ], [  1, 180.0 ] ]

@@ -91,6 +91,9 @@ def _serialize_crystal(crystal: Any) -> dict[str, Any]:
         "ub_matrix": crystal.ub_matrix.tolist() if crystal.ub_matrix is not None else None,
         "xu_cif_path": crystal.xu_cif_path,
         "phonons": crystal.phonons.get_modes_dict(),
+        "born": None if crystal.phonons.born is None else {
+            k: (v.tolist() if hasattr(v, "tolist") else v) for k, v in crystal.phonons.born.items()
+        },
     }
 
 
@@ -170,6 +173,10 @@ def _restore_state(crystal: Any, data: dict[str, Any]) -> None:
         crystal.xucalc = xucalc
         crystal.xu_lattice = xu_lattice
         crystal.xu_cif_path = data["xu_cif_path"]
+
+    if data.get("born") is not None:
+        crystal.phonons.born = {k: (np.array(v) if k in ("epsilon", "charges") else v)
+                                for k, v in data["born"].items()}
 
     if "phonons" in data:
         import warnings

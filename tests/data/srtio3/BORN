@@ -1,0 +1,8 @@
+# Test BORN file for SrTiO3 (Pm-3m): approximate literature values
+# (Zhong, King-Smith, Vanderbilt, PRL 72, 3618 (1994)); epsilon_inf approximate.
+# Independent atoms: Sr (1), Ti (2), O (3) at (1/2, 1/2, 0) with the Ti-O bond along z.
+default
+6.63 0 0 0 6.63 0 0 0 6.63
+2.54 0 0 0 2.54 0 0 0 2.54
+7.12 0 0 0 7.12 0 0 0 7.12
+-2.00 0 0 0 -2.00 0 0 0 -5.66

@@ -17,6 +17,7 @@ def angle_controls(
     energy: float,
     views: DiffractionScene | Sequence[DiffractionScene],
     hkl: tuple[int, int, int] | None = None,
+    continuous_update: bool = False,
 ) -> Any:
     """Sliders for the angles, energy and a selector for ``calc_angles`` solutions.
 
@@ -27,6 +28,8 @@ def angle_controls(
         energy: X-ray energy in eV
         views: One or several views (``LabVisualization``, ``ReciprocalVisualization``)
         hkl: Reflection whose ``calc_angles`` solutions are offered initially (optional)
+        continuous_update: Update the views while a slider is dragged (smoother, more
+            load) instead of on release
 
     Returns:
         ipywidgets.VBox with the controls
@@ -39,7 +42,7 @@ def angle_controls(
 
     sliders = {
         name: w.FloatSlider(value=views[0].angles[name], min=-180, max=180, step=0.01, description=name,
-                            continuous_update=False, readout_format=".2f", layout=w.Layout(width="420px"))
+                            continuous_update=continuous_update, readout_format=".2f", layout=w.Layout(width="420px"))
         for name in SLIDER_ANGLES
     }
     energy_box = w.BoundedFloatText(value=energy, min=100, max=100000, step=10, description="E (eV)")

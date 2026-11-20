@@ -33,6 +33,12 @@ visualization = [
     "roboticstoolbox-python @ git+https://github.com/PhilFreeman/robotics-toolbox-python.git",
 ]
 
+# Optional: DFT phonon import (phonopy YAML) and conventional cells (Crystal.from_dft(cell="conventional"))
+dft = [
+    "pyyaml",
+    "spglib",
+]
+
 # Optional: headless rendering of SWIFT scenes to PNG (CrystalVisualization.snapshot)
 headless = [
     "playwright",

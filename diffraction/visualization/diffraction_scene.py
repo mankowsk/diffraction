@@ -10,9 +10,11 @@ are parked below the floor).
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 import numpy as np
+import pandas as pd
 
 from diffraction.core.frames import convert
 from diffraction.core.lab_geometry import LabGeometry, calc_lab_geometry, to_position
+from diffraction.core.reciprocal_space import reciprocal_lattice_points, reflections_in_condition
 from diffraction.visualization.diffractometer import JOINTS
 from diffraction.visualization.scene import SwiftScene
 
@@ -20,6 +22,16 @@ if TYPE_CHECKING:
     from diffraction.core.crystal import Crystal
 
 HIDDEN = np.array([0.0, 0.0, -10.0])  # below the SWIFT floor (z = 0), invisible
+
+#: Lower bounds of relative |F|^2 for the intensity classes (strong, medium, weak) of
+#: diffracted beams, drawn with decreasing thickness
+INTENSITY_CLASSES = (0.1, 0.01, 0.0)
+DIFFRACTED_COLOR = (1.0, 0.2, 0.15, 1.0)
+
+
+def intensity_class(rel_intensity: float) -> int:
+    """Index into :data:`INTENSITY_CLASSES` (0 = strong)."""
+    return next(i for i, lower in enumerate(INTENSITY_CLASSES) if rel_intensity >= lower)
 
 FRAME_COLORS = {
     "x": (0.55, 0.0, 0.0, 1.0),
@@ -96,6 +108,48 @@ class ShapePool:
         return self.shapes[size]
 
 
+class ShapeSet:
+    """Groups of ``n`` identical shapes per size; :meth:`show` places as many as needed.
+
+    Args:
+        factory: Creates a shape of a given size
+        n: Shapes per size (maximum number shown at once)
+        step: Sizes are rounded to multiples of ``step``
+    """
+
+    def __init__(self, factory: Callable[[float], Any], n: int, step: float = 0.002) -> None:
+        self.factory = factory
+        self.n = n
+        self.step = step
+        self.sets: dict[float, list] = {}
+        self.current: float | None = None
+        self.env = None
+
+    def attach(self, env) -> None:
+        """Add the shapes created so far to ``env``; later ones are added on creation."""
+        self.env = env
+        for shapes in self.sets.values():
+            for shape in shapes:
+                env.add(shape)
+
+    def show(self, size: float, poses: list) -> None:
+        """Show ``len(poses)`` (at most ``n``) shapes of (rounded) ``size``; hide all others."""
+        size = round(max(self.step, round(size / self.step) * self.step), 6)
+        hidden = pose(np.eye(3), HIDDEN)
+        if self.current is not None and self.current != size:
+            for shape in self.sets[self.current]:
+                shape.T = hidden
+        if size not in self.sets:
+            self.sets[size] = [self.factory(size) for _ in range(self.n)]
+            for shape in self.sets[size]:
+                shape.T = hidden
+                if self.env is not None:
+                    self.env.add(shape)
+        for i, shape in enumerate(self.sets[size]):
+            shape.T = poses[i] if i < len(poses) else hidden
+        self.current = size
+
+
 class DiffractionScene(SwiftScene):
     """Base for views of the diffraction geometry at a set of diffractometer angles.
 
@@ -122,6 +176,58 @@ class DiffractionScene(SwiftScene):
         self.geometry: LabGeometry | None = None
         self.shapes: dict[str, Any] = {}
         self._angles: dict[str, float] = {k: 0.0 for k in JOINTS}
+        self._reflection_options: dict[str, Any] = {}
+        self._points: pd.DataFrame | None = None
+        self._tolerance: float | None = None
+
+    # --- reflections near the Ewald sphere ------------------------------------------------
+
+    def _init_reflections(self, q_max: float | None = None, min_intensity: float = 1e-3,
+                          max_points: int | None = 3000, tolerance: float | None = None) -> None:
+        """Options for the reflections considered (see ``reciprocal_lattice_points``)."""
+        self._reflection_options = dict(q_max=q_max, min_intensity=min_intensity, max_points=max_points)
+        self._points = None
+        self._tolerance = tolerance
+
+    @property
+    def points(self) -> pd.DataFrame:
+        """Reflections considered (``h, k, l, q, F, intensity, rel_intensity``), computed once."""
+        if self._points is None:
+            self._points = reciprocal_lattice_points(self.crystal, self.energy, **self._reflection_options)
+        return self._points
+
+    @property
+    def tolerance(self) -> float:
+        """Excitation error (1/Angstrom) for "in diffraction condition"; default 1 % of k."""
+        if self._tolerance is not None:
+            return self._tolerance
+        return 0.01 * 2 * np.pi / self.crystal.en2lam(self.energy)
+
+    @tolerance.setter
+    def tolerance(self, value: float | None) -> None:
+        self._tolerance = value
+
+    def excitation_errors(self) -> np.ndarray:
+        """Excitation error of every considered reflection at the current angles (1/Angstrom)."""
+        return self.geometry.excitation_error(self.points[["h", "k", "l"]].to_numpy(dtype=float))
+
+    def in_condition(self, tolerance: float | None = None) -> pd.DataFrame:
+        """Reflections within ``tolerance`` of the Ewald sphere, closest first.
+
+        Args:
+            tolerance: Maximum |excitation error| in 1/Angstrom (default ``self.tolerance``)
+
+        Returns:
+            DataFrame: ``points`` rows plus ``excitation_error`` (1/Angstrom), the detector
+            angles ``delta``, ``gamma``, ``two_theta`` (degrees) at which each reflection would
+            appear at the current sample angles and the beam direction ``kx, ky, kz``
+            (diffcalc frame); see ``reflections_in_condition``
+        """
+        return reflections_in_condition(self.geometry, self.points, self.tolerance if tolerance is None else tolerance)
+
+    def _table_columns(self, hits: pd.DataFrame) -> dict[str, Any]:
+        """Extra columns for the summary table (overridden by subclasses)."""
+        return {}
 
     def _add_frame_triad(self, position: np.ndarray, length: float = 0.25, radius: float = 0.008) -> None:
         """Fixed SwissFEL axes triad (x, y, z dark red / green / blue) at ``position``."""
@@ -208,11 +314,8 @@ class DiffractionScene(SwiftScene):
             self.env.step(0)
         return self.geometry
 
-    def summary(self) -> str:
-        """Text summary of the current geometry (angles, hkl, 2theta, |Q|).
-
-        If Q ends on an integer hkl, its |F|^2 is given and a systematic absence is flagged.
-        """
+    def _geometry_summary(self) -> str:
+        """Angles, energy, hkl, 2theta, |Q|; flags a systematically absent hkl at Q."""
         geo = self.geometry
         ang = ", ".join(f"{k}={v:.3f}" for k, v in self.angles.items())
         hkl = ", ".join(f"{v:.3f}" for v in geo.hkl)
@@ -226,3 +329,33 @@ class DiffractionScene(SwiftScene):
                 if self.crystal.is_systematically_absent(tuple(target), self.energy):
                     text += "  -> SYSTEMATICALLY ABSENT, not observable"
         return text
+
+    def summary(self, max_rows: int = 10) -> str:
+        """Geometry summary plus a table of the reflections in diffraction condition.
+
+        If Q ends on an integer hkl, its |F|^2 is given and a systematic absence is flagged.
+        Table: hkl, excitation error s, |F|^2, relative |F|^2, and 2theta, delta, gamma at
+        which each reflection would appear.
+
+        Args:
+            max_rows: Maximum number of reflections listed (closest to the sphere first)
+        """
+        hits = self.in_condition()
+        lines = [self._geometry_summary(),
+                 f"{len(hits)} reflection(s) within {self.tolerance:.4f} 1/A of the Ewald sphere"
+                 + (":" if len(hits) else "")]
+        if len(hits):
+            table = pd.DataFrame({
+                "hkl": [f"({h} {k} {l})" for h, k, l in zip(hits["h"], hits["k"], hits["l"])],
+                "s (1/A)": hits["excitation_error"].map("{:+.4f}".format).to_numpy(),
+                "|F|^2": hits["intensity"].map("{:.4g}".format).to_numpy(),
+                "rel": hits["rel_intensity"].map("{:.3f}".format).to_numpy(),
+                "2theta": hits["two_theta"].map("{:.2f}".format).to_numpy(),
+                "delta": hits["delta"].map("{:.2f}".format).to_numpy(),
+                "gamma": hits["gamma"].map("{:.2f}".format).to_numpy(),
+                **self._table_columns(hits),
+            })
+            lines.append(table.head(max_rows).to_string(index=False))
+            if len(hits) > max_rows:
+                lines.append(f"... {len(hits) - max_rows} more (vis.in_condition())")
+        return "\n".join(lines)

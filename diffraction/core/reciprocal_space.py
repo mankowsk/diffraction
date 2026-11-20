@@ -1,4 +1,4 @@
-"""Reciprocal lattice points with structure-factor intensities."""
+"""Reciprocal lattice points with structure-factor intensities and the Ewald condition."""
 
 from typing import TYPE_CHECKING
 
@@ -7,6 +7,7 @@ import pandas as pd
 
 if TYPE_CHECKING:
     from diffraction.core.crystal import Crystal
+    from diffraction.core.lab_geometry import LabGeometry
 
 
 def reciprocal_lattice_points(
@@ -61,3 +62,27 @@ def reciprocal_lattice_points(
     if max_points is not None and len(df) > max_points:
         df = df.nlargest(max_points, "intensity")
     return df.sort_values("q").reset_index(drop=True)
+
+
+def reflections_in_condition(geometry: "LabGeometry", points: pd.DataFrame, tolerance: float) -> pd.DataFrame:
+    """Reflections within ``tolerance`` of the Ewald sphere, closest first.
+
+    Args:
+        geometry: Lab geometry at the current angles (``Crystal.calc_lab_geometry``)
+        points: Reflections as from :func:`reciprocal_lattice_points` (columns ``h, k, l``, ...)
+        tolerance: Maximum |excitation error| in 1/Angstrom
+
+    Returns:
+        DataFrame: ``points`` rows plus ``excitation_error`` (1/Angstrom), the detector
+        angles ``delta``, ``gamma``, ``two_theta`` (degrees) at which each reflection appears
+        and ``kx, ky, kz``: unit vector of the diffracted beam k_i + G (diffcalc frame)
+    """
+    hkls = points[["h", "k", "l"]].to_numpy(dtype=float)
+    df = points.assign(excitation_error=geometry.excitation_error(hkls))
+    df = df[df["excitation_error"].abs() <= tolerance]
+    df = df.reindex(df["excitation_error"].abs().sort_values().index)
+    hkls = df[["h", "k", "l"]].to_numpy(dtype=float)
+    delta, gamma, two_theta = geometry.detector_angles(hkls)
+    k_f = hkls @ geometry.reciprocal_lattice.T + geometry.k_i
+    u = k_f / np.linalg.norm(k_f, axis=1, keepdims=True) if len(df) else np.zeros((0, 3))
+    return df.assign(delta=delta, gamma=gamma, two_theta=two_theta, kx=u[:, 0], ky=u[:, 1], kz=u[:, 2])

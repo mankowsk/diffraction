@@ -47,6 +47,12 @@ class PhononsManager:
         """
         self.crystal = crystal
         self._modes: dict[str, PhononMode] = {}
+        #: Summary DataFrame of the last ``add_from_dft`` call (None before)
+        self.last_import: "pd.DataFrame | None" = None
+        #: Born effective charges from the last DFT import with a BORN file: ``epsilon``
+        #: (3x3), ``charges`` (n_atoms x 3 x 3, crystal atoms), crystal Cartesian frame
+        #: (that of ``get_lattice()``); Z*_{gamma alpha}, gamma = field, alpha = displacement
+        self.born: dict | None = None
 
     def add_mode(
         self,
@@ -349,6 +355,10 @@ class PhononsManager:
         bands: list[int] | None = None,
         name_prefix: str | None = None,
         position_tol: float = 0.1,
+        transformation: np.ndarray | list | None = None,
+        irreps: str | None = "auto",
+        align_degenerate: bool = True,
+        born: str | None = "auto",
     ) -> "pd.DataFrame":
         """Import phonon modes from a phonopy YAML file (band.yaml, qpoints.yaml, mesh.yaml).
 
@@ -358,6 +368,13 @@ class PhononsManager:
         Acoustic modes are imported as well; they are flagged and naturally do
         not conserve the center of mass.
 
+        If the crystal cell differs from the DFT cell (e.g. hexagonal crystal, rhombohedral
+        DFT cell), Gamma-point modes are mapped onto the crystal cell: the integer
+        transformation A_crystal = M A_dft is found from the lattices (or given as
+        ``transformation``), every crystal atom is assigned to the DFT atom it is a lattice
+        translate of, and equivalent atoms get the same displacement (renormalized over the
+        crystal cell). See :mod:`diffraction.phonons.cell_transform`.
+
         Args:
             path: Path to the phonopy YAML file (written with eigenvectors)
             q_index: Index of the q-point in the file
@@ -365,15 +382,31 @@ class PhononsManager:
             name_prefix: Prefix for mode names (default ``"<file stem>_q<q_index>_"``);
                 modes are named ``<prefix>b<band>``
             position_tol: Atom matching residual (Angstrom) above which a warning is issued
+            transformation: Integer matrix M with A_crystal = M A_dft (rows = lattice
+                vectors); default: found automatically when the cells differ
+            irreps: phonopy ``irreps.yaml`` with the mode symmetry labels (``mode.irrep``):
+                ``"auto"`` (default) uses ``irreps.yaml`` next to ``path`` if it exists, a path
+                uses that file, None skips. Used only if q-point, band count and frequencies
+                match the imported q-point (otherwise a warning and no labels; with ``"auto"``
+                a different q-point is skipped silently, as irreps.yaml is usually for Gamma).
+            align_degenerate: At Gamma, rotate every degenerate set (arbitrary basis from the
+                diagonalization) into partners polarized along the crystal axes x || a,
+                z || a x b of the conventional cell (``mode.polarization``); sets that are not
+                vector-like stay as in the file. See :mod:`diffraction.phonons.alignment`.
+            born: phonopy ``BORN`` file (dielectric tensor, Born effective charges):
+                ``"auto"`` (default) uses ``BORN`` next to ``path`` if it exists, a path uses
+                that file, None skips. Stored in ``self.born`` (crystal atoms, crystal
+                Cartesian frame); each mode gets its mode effective charge ``born_charge``.
 
         Returns:
             pandas.DataFrame: One row per imported mode with frequency and
-            consistency checks. The atom matching report is in ``df.attrs["import_report"]``.
+            consistency checks. The atom matching report is in ``df.attrs["import_report"]``;
+            the DataFrame is also kept as ``last_import``.
 
         Raises:
-            ValueError: If the number of atoms differs from the crystal
+            ValueError: If the cells differ and the q-point is not Gamma, or no cell
+                transformation maps the DFT atoms onto the crystal atoms
         """
-        import pandas as pd
         from .dft_importers import parse_phonopy_yaml
 
         data = parse_phonopy_yaml(path)
@@ -381,16 +414,23 @@ class PhononsManager:
         cif_species, cif_positions = self._get_sites()
         lattice = self.get_lattice()
 
-        if len(data["species"]) != len(cif_species):
-            raise ValueError(
-                f"{path} has {len(data['species'])} atoms, but crystal has {len(cif_species)} atoms."
-            )
+        if name_prefix is None:
+            name_prefix = f"{os.path.splitext(os.path.basename(path))[0]}_q{q_index}_"
+        band_indices = range(len(qpoint["bands"])) if bands is None else bands
+        labels, irreps_info = _load_irreps(path, irreps, qpoint)
+        prep = _prepare_dft_modes(path, data, qpoint, align_degenerate, born)
+        irreps_info = {**irreps_info, **prep["report"]}
+
+        if len(data["species"]) != len(cif_species) or transformation is not None:
+            return self._add_from_dft_cell(path, data, qpoint, q_index, band_indices, name_prefix,
+                                           position_tol, transformation, labels, irreps_info, prep)
 
         report = _match_atoms(data["species"], data["positions"], cif_species, cif_positions, lattice)
         report["lattice_mismatch"] = _lattice_mismatch(data["lattice"], lattice)
         report["masses_dft"] = data["masses"].tolist()
         report["masses_cif"] = self.get_masses().tolist()
         report["file"] = os.path.abspath(path)
+        report.update(irreps_info)
 
         if not report["species_match"]:
             warnings.warn(
@@ -417,16 +457,12 @@ class PhononsManager:
         masses = data["masses"][order]
         atom_names = [data["species"][i] for i in order]
 
-        if name_prefix is None:
-            name_prefix = f"{os.path.splitext(os.path.basename(path))[0]}_q{q_index}_"
-        band_indices = range(len(qpoint["bands"])) if bands is None else bands
-
-        rows = []
+        modes = []
         for b in band_indices:
             band = qpoint["bands"][b]
             mode = PhononMode.from_vectors(
                 f"{name_prefix}b{b}",
-                band["eigenvector"][order],
+                prep["eigenvectors"][b][order],
                 masses,
                 lattice,
                 coords="cartesian",
@@ -437,23 +473,196 @@ class PhononsManager:
                 atom_names=atom_names,
                 source=f"phonopy:{os.path.basename(path)} q{q_index} b{b}",
                 import_report=report,
+                irrep=labels[b],
+                polarization=prep["polarization"][b],
                 check="off",
             )
+            modes.append((b, mode))
+        return self._register_dft_modes(modes, report, prep, data["lattice"], order)
+
+    def _add_from_dft_cell(self, path, data, qpoint, q_index, band_indices, name_prefix, position_tol,
+                           transformation, labels, irreps_info, prep) -> "pd.DataFrame":
+        """``add_from_dft`` for a crystal cell different from the DFT cell (Gamma point only)."""
+        from .cell_transform import best_cell_mapping
+
+        if np.any(np.abs(qpoint["q"]) > 1e-8):
+            raise ValueError(
+                f"The crystal cell differs from the DFT cell in {path}; only Gamma-point modes can be mapped "
+                f"(q-point {q_index} is {qpoint['q'].tolist()})."
+            )
+        cif_species, cif_positions = self._get_sites()
+        lattice = self.get_lattice()
+        A_dft = data["lattice"]
+        mapping = best_cell_mapping(cif_species, cif_positions, lattice, data["species"], data["positions"],
+                                    A_dft, transformation)
+        M = np.asarray(mapping["transformation"], dtype=float)
+        idx = np.asarray(mapping["mapping"])
+        report = {
+            **mapping,
+            "species_match": True,
+            "cell_ratio": int(round(abs(np.linalg.det(M)))),
+            "lattice_mismatch": _lattice_mismatch(M @ A_dft, lattice),
+            "masses_dft": data["masses"].tolist(),
+            "masses_cif": self.get_masses().tolist(),
+            "file": os.path.abspath(path),
+            **irreps_info,
+        }
+        if mapping["max_residual"] > position_tol:
+            warnings.warn(
+                f"Atom positions in {path} deviate from the crystal by up to "
+                f"{mapping['max_residual']:.3f} Angstrom after mapping the cells.",
+                PhononConsistencyWarning,
+                stacklevel=3,
+            )
+
+        masses = data["masses"][idx]
+        atom_names = [data["species"][i] for i in idx]
+        to_crystal = np.linalg.inv(A_dft) @ np.linalg.inv(M)  # Cartesian (DFT frame) -> crystal reduced
+        modes = []
+        for b in band_indices:
+            band = qpoint["bands"][b]
+            u_cart = prep["eigenvectors"][b] / np.sqrt(data["masses"])[:, None]
+            mode = PhononMode.from_vectors(
+                f"{name_prefix}b{b}",
+                (u_cart @ to_crystal)[idx],
+                masses,
+                lattice,
+                coords="reduced",
+                kind="displacement",
+                q=qpoint["q"],
+                frequency=band["frequency"],
+                atom_names=atom_names,
+                source=f"phonopy:{os.path.basename(path)} q{q_index} b{b} (cell x{report['cell_ratio']})",
+                import_report=report,
+                irrep=labels[b],
+                polarization=prep["polarization"][b],
+                check="off",
+            )
+            modes.append((b, mode))
+        return self._register_dft_modes(modes, report, prep, M @ A_dft, idx)
+
+    def _register_dft_modes(self, modes: list, report: dict, prep: dict, cell_in_dft_frame: np.ndarray,
+                            atom_index: np.ndarray) -> "pd.DataFrame":
+        """Attach Born charges, add the modes and return the summary DataFrame (``last_import``).
+
+        Args:
+            cell_in_dft_frame: Crystal lattice (rows) expressed in the DFT Cartesian frame
+            atom_index: DFT atom of every crystal atom
+        """
+        import pandas as pd
+
+        if prep["born"] is not None:
+            # Rotation DFT Cartesian -> crystal Cartesian (nearest rotation if the lattices
+            # differ slightly, e.g. CIF vs DFT lattice parameters)
+            U, _, Vt = np.linalg.svd(np.linalg.inv(cell_in_dft_frame) @ self.get_lattice())
+            R = U @ Vt
+            charges = np.einsum("ag,kab,bd->kgd", R, prep["born"]["charges"][np.asarray(atom_index)], R)
+            self.born = {
+                "epsilon": R.T @ prep["born"]["epsilon"] @ R,
+                "charges": charges,
+                "factor": prep["born"]["factor"],
+                "file": prep["born"]["file"],
+            }
+        for b, mode in modes:
+            if self.born is not None and prep["born"] is not None:
+                u = mode.displacement_cartesian.real
+                mode.born_charge = np.einsum("kga,ka->g", self.born["charges"], u)
+
+        rows = []
+        for b, mode in modes:
             self.add(mode)
             rows.append(
                 {
                     "name": mode.name,
                     "band": b,
                     "frequency_THz": mode.frequency,
+                    "irrep": mode.irrep,
+                    "polarization": mode.polarization,
+                    "alignment_weight": prep["weights"][b],
+                    "Z_mode": None if mode.born_charge is None else float(np.linalg.norm(mode.born_charge)),
                     "acoustic": mode.consistency["is_acoustic"],
                     "com_residual": mode.consistency["com_residual"],
                     "conserves_com": mode.consistency["conserves_com"],
                 }
             )
-
         df = pd.DataFrame(rows)
         df.attrs["import_report"] = report
+        self.last_import = df
         return df
+
+
+def _prepare_dft_modes(path: str, data: dict, qpoint: dict, align_degenerate: bool, born: str | None) -> dict:
+    """Aligned eigenvectors (DFT frame) and Born charges (DFT atoms and frame) for an import."""
+    from .alignment import align_degenerate_modes, conventional_axes
+    from .dft_importers import expand_born_charges, parse_phonopy_born
+
+    eigenvectors = np.array([band["eigenvector"] for band in qpoint["bands"]])
+    n_bands = len(eigenvectors)
+    prep = {"eigenvectors": eigenvectors, "polarization": [None] * n_bands, "weights": [None] * n_bands,
+            "born": None, "report": {}}
+
+    if align_degenerate and np.allclose(qpoint["q"], 0.0):
+        axes = conventional_axes(data["lattice"], data["species"], data["positions"])
+        aligned, labels, weights, sets = align_degenerate_modes(
+            [band["frequency"] for band in qpoint["bands"]], eigenvectors, axes, data["masses"])
+        prep.update(eigenvectors=aligned, polarization=labels, weights=weights)
+        prep["report"]["aligned_sets"] = sets
+        prep["report"]["alignment_axes"] = axes.tolist()  # DFT Cartesian frame
+
+    if born == "auto":
+        born = os.path.join(os.path.dirname(os.path.abspath(path)), "BORN")
+        born = born if os.path.exists(born) else None
+    if born is not None:
+        parsed = parse_phonopy_born(born)
+        charges = expand_born_charges(parsed["charges"], data["lattice"], data["species"], data["positions"])
+        prep["born"] = {"charges": charges, "epsilon": parsed["epsilon"], "factor": parsed["factor"],
+                        "file": os.path.abspath(born)}
+        prep["report"]["born_file"] = os.path.abspath(born)
+        prep["report"]["born_sum_rule"] = float(np.abs(charges.sum(axis=0)).max())
+    return prep
+
+
+def _load_irreps(path: str, irreps: str | None, qpoint: dict) -> tuple[list, dict]:
+    """Irrep label per band from phonopy's irreps.yaml (see ``add_from_dft``).
+
+    Returns:
+        tuple: (label or None per band, report entries ``irreps_file`` and ``point_group``)
+    """
+    from .dft_importers import parse_phonopy_irreps
+
+    n_bands = len(qpoint["bands"])
+    none = [None] * n_bands
+    if irreps is None:
+        return none, {}
+    auto = irreps == "auto"
+    if auto:
+        irreps = os.path.join(os.path.dirname(os.path.abspath(path)), "irreps.yaml")
+        if not os.path.exists(irreps):
+            return none, {}
+    data = parse_phonopy_irreps(irreps)
+    if auto and not np.allclose(data["q"], qpoint["q"], atol=1e-6):
+        return none, {}  # irreps.yaml is usually written for Gamma only; other q-points: no labels
+
+    problem = None
+    bands = sorted(b for m in data["modes"] for b in m["bands"])
+    freqs = np.array([band["frequency"] for band in qpoint["bands"]])
+    if not np.allclose(data["q"], qpoint["q"], atol=1e-6):
+        problem = f"its q-point {data['q'].tolist()} differs from the imported {qpoint['q'].tolist()}"
+    elif bands != list(range(n_bands)):
+        problem = f"it covers {len(bands)} bands, the DFT file has {n_bands}"
+    else:
+        mismatch = max(abs(freqs[m["bands"][0]] - m["frequency"]) for m in data["modes"])
+        if mismatch > max(0.05, 0.01 * np.abs(freqs).max()):
+            problem = f"its frequencies differ from the DFT file by up to {mismatch:.3f} THz"
+    if problem:
+        warnings.warn(f"Ignoring {irreps}: {problem}.", PhononConsistencyWarning, stacklevel=3)
+        return none, {}
+
+    labels = list(none)
+    for m in data["modes"]:
+        for b in m["bands"]:
+            labels[b] = m["label"]
+    return labels, {"irreps_file": os.path.abspath(irreps), "point_group": data["point_group"]}
 
 
 def _match_atoms(

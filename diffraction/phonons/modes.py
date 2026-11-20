@@ -62,6 +62,12 @@ class PhononMode:
         source: Free-text origin of the mode (e.g. ``"phonopy:band.yaml q0 b5"``)
         import_report: Details recorded during import (atom mapping, origin
             shift, lattice mismatch, ...)
+        irrep: Symmetry label (irreducible representation, e.g. ``"A1g"``, ``"Eu"``) if
+            known, e.g. from phonopy's irreps.yaml
+        polarization: Crystal axis (``"x"``, ``"y"``, ``"z"``; x || a, z || a x b of the
+            conventional cell) of a degenerate partner aligned on import, else None
+        born_charge: Mode effective charge Z_gamma = sum_k,alpha Z*_k,gamma alpha u_k,alpha
+            (e/sqrt(amu), Cartesian frame of ``lattice``) if Born charges were imported
         consistency: Result of :meth:`check`, recomputed on construction
     """
 
@@ -74,6 +80,9 @@ class PhononMode:
     q: np.ndarray = field(default_factory=lambda: np.zeros(3))
     source: str | None = None
     import_report: dict | None = None
+    irrep: str | None = None
+    polarization: str | None = None
+    born_charge: np.ndarray | None = None
     consistency: dict = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
@@ -116,6 +125,8 @@ class PhononMode:
         atom_names: list[str] | None = None,
         source: str | None = None,
         import_report: dict | None = None,
+        irrep: str | None = None,
+        polarization: str | None = None,
         check: str = "warn",
     ) -> "PhononMode":
         """Create a phonon mode from vectors in any supported convention.
@@ -143,6 +154,8 @@ class PhononMode:
             atom_names: Optional element symbols
             source: Free-text origin of the mode
             import_report: Details recorded during import
+            irrep: Symmetry label of the mode (optional)
+            polarization: Crystal axis of an aligned degenerate partner (optional)
             check: What to do if a Gamma-point optical mode does not conserve the
                 center of mass: ``"warn"``, ``"raise"`` or ``"off"``
 
@@ -191,6 +204,8 @@ class PhononMode:
             q=np.asarray(q, dtype=float),
             source=source,
             import_report=import_report,
+            irrep=irrep,
+            polarization=polarization,
         )
 
         if kind == "displacement" and mode.consistency.get("conserves_com") is False:
@@ -327,6 +342,9 @@ class PhononMode:
             "q": self.q.tolist(),
             "source": self.source,
             "import_report": _to_jsonable(self.import_report),
+            "irrep": self.irrep,
+            "polarization": self.polarization,
+            "born_charge": None if self.born_charge is None else np.asarray(self.born_charge).tolist(),
         }
 
     @classmethod
@@ -353,10 +371,14 @@ class PhononMode:
             q=np.array(data.get("q", [0.0, 0.0, 0.0])),
             source=data.get("source"),
             import_report=data.get("import_report"),
+            irrep=data.get("irrep"),
+            polarization=data.get("polarization"),
+            born_charge=None if data.get("born_charge") is None else np.array(data["born_charge"]),
         )
 
     def __repr__(self) -> str:
         freq = f"{self.frequency:.3f} THz" if self.frequency is not None else None
+        irrep = f", irrep={self.irrep}" if self.irrep else ""
         tags = []
         if self.consistency.get("is_acoustic"):
             tags.append("acoustic")
@@ -365,7 +387,7 @@ class PhononMode:
         tag_str = f", {', '.join(tags)}" if tags else ""
         return (
             f"PhononMode(name='{self.name}', atoms={self.n_atoms}, freq={freq}, "
-            f"q={self.q.tolist()}{tag_str})"
+            f"q={self.q.tolist()}{irrep}{tag_str})"
         )
 
 

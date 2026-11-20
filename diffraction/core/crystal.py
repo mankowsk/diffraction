@@ -69,6 +69,7 @@ class Crystal:
         self.ubcalc.set_lattice(**self.unit_cell)
         self.orientations: list[dict] = []
         self.surface_normal: dict | None = None
+        self.space_group: str | None = None  # set by from_dft(cell="conventional")
         self.reflections: list[dict] = []
         self.u_matrix: np.ndarray | None = None
         self.ub_matrix: np.ndarray | None = None
@@ -112,6 +113,63 @@ class Crystal:
         crystal.xucalc = xucalc
         crystal.xu_lattice = xu_lattice
         crystal.xu_cif_path = path_to_cif
+        return crystal
+
+    @classmethod
+    def from_dft(
+        cls,
+        name: str,
+        path: str,
+        q_index: int | None = 0,
+        bands: list[int] | None = None,
+        cell: str = "dft",
+        symprec: float = 1e-3,
+        **import_kwargs: Any,
+    ) -> "Crystal":
+        """Create a Crystal (unit cell and phonon modes) from a DFT phonon file.
+
+        Supported: phonopy ``band.yaml`` / ``qpoints.yaml`` / ``mesh.yaml`` written with
+        eigenvectors. The structure becomes a P1 crystal with all atoms listed explicitly
+        (B = 0, occupancy 1); ``save()`` writes it as CIF next to the JSON.
+
+        Args:
+            name: Name of the crystal
+            path: Path to the DFT file
+            q_index: q-point whose modes are imported (``None``: structure only)
+            bands: Band indices to import (default: all)
+            cell: ``"dft"`` (unit cell and atom order exactly as in the file) or
+                ``"conventional"`` (standardized conventional cell via spglib, e.g. hexagonal
+                for a rhombohedral primitive cell; Gamma-point modes are mapped onto it)
+            symprec: Symmetry tolerance (Angstrom) for ``cell="conventional"``
+            **import_kwargs: Passed to ``crystal.phonons.add_from_dft`` (``name_prefix``,
+                ``position_tol``, ``transformation``, ``irreps``: phonopy irreps.yaml with the
+                mode symmetry labels, by default ``irreps.yaml`` next to ``path`` if present)
+
+        Returns:
+            Crystal: Summary of the imported modes in ``crystal.phonons.last_import``;
+            for ``cell="conventional"`` the space group is in ``crystal.space_group``
+        """
+        from diffraction.phonons.dft_importers import conventional_cell, p1_lattice, parse_phonopy_yaml
+
+        if not str(path).lower().endswith((".yaml", ".yml")):
+            raise NotImplementedError(f"Unsupported DFT file '{path}'; only phonopy YAML files are supported.")
+        if cell not in ("dft", "conventional"):
+            raise ValueError(f"cell must be 'dft' or 'conventional', got '{cell}'")
+
+        data = parse_phonopy_yaml(path)
+        lattice, species, positions = data["lattice"], data["species"], data["positions"]
+        space_group = None
+        if cell == "conventional":
+            lattice, species, positions, space_group = conventional_cell(lattice, species, positions, symprec)
+
+        xu_lattice = p1_lattice(lattice, species, positions)
+        xucalc = xu.materials.Crystal(name, xu_lattice)
+        crystal = cls(name, xucalc.a, xucalc.b, xucalc.c, xucalc.alpha, xucalc.beta, xucalc.gamma)
+        crystal.xucalc = xucalc
+        crystal.xu_lattice = xu_lattice
+        crystal.space_group = space_group
+        if q_index is not None:
+            crystal.phonons.add_from_dft(path, q_index=q_index, bands=bands, **import_kwargs)
         return crystal
 
     def add_orientation(self, hkl: tuple[int, int, int], xyz: tuple[float, float, float], tag: str | None = None, frame: str = "swissfel") -> None:
@@ -291,8 +349,11 @@ class Crystal:
 
         return calc_lab_geometry(self, angles, energy)
 
-    def calc_hkl(self, mu: float, delta: float, gamma: float, eta: float, chi: float, phi: float, energy: float) -> tuple[int, int, int] | None:
+    def calc_hkl(self, mu: float, delta: float, gamma: float, eta: float, chi: float, phi: float, energy: float, **kwargs: Any) -> tuple[int, int, int] | None:
         """Calculate Miller indices from measured diffractometer angles.
+
+        Extra keyword arguments are ignored, so a solution of :meth:`calc_angles` can be
+        passed directly: ``crystal.calc_hkl(**df.iloc[0].to_dict(), energy=energy)``.
 
         Args:
             mu: Mu angle in degrees
@@ -302,6 +363,7 @@ class Crystal:
             chi: Chi angle in degrees
             phi: Phi angle in degrees
             energy: X-ray energy in eV
+            **kwargs: Ignored (e.g. virtual angles and ``F2`` of a ``calc_angles`` row)
 
         Returns:
             tuple or None: Miller indices (h, k, l) or None if calculation fails

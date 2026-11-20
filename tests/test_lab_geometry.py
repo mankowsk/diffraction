@@ -135,3 +135,10 @@ def test_reciprocal_axes_hexagonal():
     assert angle(geo.lattice[:, 0], geo.k_i) == pytest.approx(30, abs=1e-6)
     sf = geo.in_frame("swissfel")
     np.testing.assert_allclose(sf["reciprocal_lattice"] @ geo.hkl, sf["Q"], atol=1e-10)
+
+
+def test_calc_hkl_from_calc_angles_row():
+    crystal = _crystal("SrTiO3", "diffraction/data/SrTiO3.cif", eta=0, phi=0, delta=0)
+    df = crystal.calc_angles((1, 1, 1), 9000)
+    for _, row in df.iterrows():
+        np.testing.assert_allclose(crystal.calc_hkl(**row.to_dict(), energy=9000), (1, 1, 1), atol=1e-8)

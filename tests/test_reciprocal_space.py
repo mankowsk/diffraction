@@ -118,3 +118,35 @@ def test_detector_angles(bi2se3_side):
             if abs(row["delta"]) <= 90:
                 assert delta == pytest.approx(row["delta"], abs=1e-8)
                 assert gamma == pytest.approx(row["gamma"], abs=1e-8)
+
+
+def test_diffracted_beams_and_detector_hits(bi2se3):
+    """Both views list the same reflections; at a solution the target beam hits the detector."""
+    pytest.importorskip("roboticstoolbox")
+    from diffraction.core.reciprocal_space import reflections_in_condition
+    from diffraction.visualization.lab_view import LabVisualization
+    from diffraction.visualization.reciprocal_view import ReciprocalVisualization
+
+    energy = 7500
+    row = bi2se3.calc_angles((0, 0, 15), energy).iloc[0]
+    lab = LabVisualization(bi2se3, energy)
+    rec = ReciprocalVisualization(bi2se3, energy)
+    lab.set_angles(row)
+    rec.set_angles(row)
+    hits_lab, hits_rec = lab.in_condition(), rec.in_condition()
+    assert list(zip(hits_lab.h, hits_lab.k, hits_lab.l)) == list(zip(hits_rec.h, hits_rec.k, hits_rec.l))
+    direct = reflections_in_condition(lab.geometry, lab.points, lab.tolerance)
+    np.testing.assert_allclose(direct["excitation_error"], hits_lab["excitation_error"])
+
+    target = hits_lab[(hits_lab.h == 0) & (hits_lab.k == 0) & (hits_lab.l == 15)]
+    beam = target[["kx", "ky", "kz"]].to_numpy()[0]
+    np.testing.assert_allclose(beam, lab.geometry.k_f / np.linalg.norm(lab.geometry.k_f), atol=1e-9)
+    hit, _ = lab.detector_hits(hits_lab)
+    assert hit[list(hits_lab.index).index(target.index[0])]
+    assert hit.sum() == 1
+
+    # 1 deg off in eta: (0 0 15) leaves the Bragg condition (|s| ~ |G| * 0.017 > tolerance)
+    lab.set_angles(eta=row["eta"] + 1.0)
+    hits = lab.in_condition()
+    assert not ((hits.h == 0) & (hits.k == 0) & (hits.l == 15)).any()
+    assert not lab.detector_hits(hits)[0].any()

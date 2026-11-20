@@ -8,18 +8,28 @@ here), with ``scale`` scene units per 1/Angstrom.
 
 Colors: lattice points steel blue, (000) white, reflections in diffraction condition
 red halo, Ewald sphere yellow wireframe (limiting sphere grey), k_i yellow / k_f orange (from the sphere centre),
-Q magenta (from the origin), a*, b*, c* red / green / blue, SwissFEL axes triad dark red /
+Q magenta (from the origin), diffracted beams k_f = k_i + G of the highlighted reflections
+red (from the sphere centre; thickness by intensity class), a*, b*, c* red / green / blue, SwissFEL axes triad dark red /
 dark green / dark blue.
 """
 
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import pandas as pd
 
 from diffraction.core.frames import convert
 from diffraction.core.reciprocal_space import reciprocal_lattice_points
-from diffraction.visualization.diffraction_scene import DiffractionScene, HIDDEN, ShapePool, arrow, arrow_pose, pose
+from diffraction.visualization.diffraction_scene import (
+    DIFFRACTED_COLOR,
+    HIDDEN,
+    DiffractionScene,
+    ShapePool,
+    ShapeSet,
+    arrow,
+    arrow_pose,
+    intensity_class,
+    pose,
+)
 from diffraction.visualization.meshes import MODELS_DIR, SPHERE_WIREFRAME_FILE
 
 if TYPE_CHECKING:
@@ -87,13 +97,14 @@ class ReciprocalVisualization(DiffractionScene):
         """
         k = 2 * np.pi / crystal.en2lam(energy)
         self.scale = sphere_radius / k
-        self.points = reciprocal_lattice_points(crystal, energy, q_max=q_max, min_intensity=min_intensity,
-                                                max_points=max_points)
-        reach = max(2 * k, self.points["q"].max() if len(self.points) else 0.0) * self.scale
+        points = reciprocal_lattice_points(crystal, energy, q_max=q_max, min_intensity=min_intensity,
+                                           max_points=max_points)
+        reach = max(2 * k, points["q"].max() if len(points) else 0.0) * self.scale
         # Origin of reciprocal space high enough that everything stays above the SWIFT floor
         super().__init__(crystal, energy, origin=np.array([0.0, 0.0, reach + 0.05]))
+        self._init_reflections(q_max=q_max, min_intensity=min_intensity, max_points=max_points, tolerance=tolerance)
+        self._points = points
         self.sphere_radius = sphere_radius
-        self.tolerance = tolerance if tolerance is not None else 0.01 * k
         self.point_radius = point_radius
         self.limiting_sphere = limiting_sphere
         # Side view from the left (SwissFEL +x), centred between sphere centre and origin
@@ -132,6 +143,11 @@ class ReciprocalVisualization(DiffractionScene):
         self.k_i_pool = ShapePool(lambda length: arrow(COLORS["k_i"], 0.004, length), step)
         self.k_f_pool = ShapePool(lambda length: arrow(COLORS["k_f"], 0.004, length), step)
         self.q_pool = ShapePool(lambda length: arrow(COLORS["Q"], 0.005, length), step)
+        # Diffracted beams per intensity class (strong thick ... weak thin), length k
+        self.beam_sets = [
+            ShapeSet(lambda length, r=r: arrow(DIFFRACTED_COLOR, r, length, head=0.015), self.N_HIGHLIGHTS, step)
+            for r in (0.004, 0.0025, 0.0015)
+        ]
 
         # a*, b*, c* to scale (the lattice scale is fixed)
         for i, name in enumerate(("a*", "b*", "c*")):
@@ -146,7 +162,7 @@ class ReciprocalVisualization(DiffractionScene):
         super()._add_to_env()
         for h in self.highlights:
             self.env.add(h)
-        for p in (self.sphere_pool, self.limiting_pool, self.k_i_pool, self.k_f_pool, self.q_pool):
+        for p in (self.sphere_pool, self.limiting_pool, self.k_i_pool, self.k_f_pool, self.q_pool, *self.beam_sets):
             p.attach(self.env)
 
     def _update_shapes(self) -> None:
@@ -172,55 +188,14 @@ class ReciprocalVisualization(DiffractionScene):
         for i, name in enumerate(("a*", "b*", "c*")):
             self.shapes[name].T = arrow_pose(o, sw["reciprocal_lattice"][:, i])
 
-        # Halos on the reflections in diffraction condition (closest first)
+        # Halos on the reflections in diffraction condition (closest first) and their
+        # diffracted beams from the sphere centre
         hits = self.in_condition()
         positions = hits[["h", "k", "l"]].to_numpy(dtype=float) @ sw["reciprocal_lattice"].T * s + o
         for i, h in enumerate(self.highlights):
             h.T = pose(np.eye(3), positions[i] if i < len(positions) else HIDDEN)
-
-    def excitation_errors(self) -> np.ndarray:
-        """Excitation error of every drawn reflection at the current angles (1/Angstrom)."""
-        return self.geometry.excitation_error(self.points[["h", "k", "l"]].to_numpy(dtype=float))
-
-    def in_condition(self, tolerance: float | None = None) -> pd.DataFrame:
-        """Reflections within ``tolerance`` of the Ewald sphere, closest first.
-
-        Args:
-            tolerance: Maximum |excitation error| in 1/Angstrom (default ``self.tolerance``)
-
-        Returns:
-            DataFrame: ``points`` rows plus ``excitation_error`` (1/Angstrom) and the detector
-            angles ``delta``, ``gamma`` and ``two_theta`` (degrees) at which each reflection
-            would appear at the current sample angles
-        """
-        tol = self.tolerance if tolerance is None else tolerance
-        df = self.points.assign(excitation_error=self.excitation_errors())
-        df = df[df["excitation_error"].abs() <= tol]
-        df = df.reindex(df["excitation_error"].abs().sort_values().index)
-        delta, gamma, two_theta = self.geometry.detector_angles(df[["h", "k", "l"]].to_numpy(dtype=float))
-        return df.assign(delta=delta, gamma=gamma, two_theta=two_theta)
-
-    def summary(self, max_rows: int = 10) -> str:
-        """Geometry summary plus a table of the reflections in diffraction condition.
-
-        Args:
-            max_rows: Maximum number of reflections listed (closest to the sphere first)
-        """
-        hits = self.in_condition()
-        lines = [super().summary(),
-                 f"{len(hits)} reflection(s) within {self.tolerance:.4f} 1/A of the Ewald sphere"
-                 + (":" if len(hits) else "")]
-        if len(hits):
-            table = pd.DataFrame({
-                "hkl": [f"({h} {k} {l})" for h, k, l in zip(hits["h"], hits["k"], hits["l"])],
-                "s (1/A)": hits["excitation_error"].map("{:+.4f}".format),
-                "|F|^2": hits["intensity"].map("{:.4g}".format),
-                "rel": hits["rel_intensity"].map("{:.3f}".format),
-                "2theta": hits["two_theta"].map("{:.2f}".format),
-                "delta": hits["delta"].map("{:.2f}".format),
-                "gamma": hits["gamma"].map("{:.2f}".format),
-            })
-            lines.append(table.head(max_rows).to_string(index=False))
-            if len(hits) > max_rows:
-                lines.append(f"... {len(hits) - max_rows} more (vis.in_condition())")
-        return "\n".join(lines)
+        beams = hits.nlargest(self.N_HIGHLIGHTS, "intensity")
+        directions = convert(beams[["kx", "ky", "kz"]].to_numpy(dtype=float), "diffcalc", "swift")
+        classes = [intensity_class(r) for r in beams["rel_intensity"]]
+        for c, beam_set in enumerate(self.beam_sets):
+            beam_set.show(k, [arrow_pose(centre, d) for d, cls in zip(directions, classes) if cls == c])
